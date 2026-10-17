@@ -1,4 +1,4 @@
-﻿const test = require('node:test');
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   stripComments,
@@ -70,5 +70,21 @@ GO TO @init
   const lines = res.text.trim().split(/\r?\n/);
   assert.equal(lines[0], '100 LET a=10');
   assert.equal(lines[1], '110 GO TO 100');
+});
+
+test('compileJBas detects duplicate labels', () => {
+  const source = `
+@start:
+LET x=1
+@loop:
+LET x=x+1
+@start:
+STOP
+`;
+  const res = compileJBas(source);
+  assert.equal(res.success, false);
+  assert.equal(res.errors.length, 1);
+  assert.match(res.errors[0], /Duplicate label definition '@start'/);
+  assert.match(res.errors[0], /previously defined on line 2/);
 });
 

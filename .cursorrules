@@ -32,7 +32,7 @@ Welcome! This document provides complete context for any AI agent working on the
 ## 3. Toolchain & User Environment
 
 In the author's local environment, the tools are configured as:
-* **bas2tap**: `C:\Users\rault\bin\bas2tap.exe` (compiles `.bas` to `.tap` tape image with autostart `-a<line>`).
+* **bas2tap**: `C:\Users\user\bin\bas2tap.exe` (compiles `.bas` to `.tap` tape image with autostart `-a<line>`).
 * **Fuse Emulator**: `C:\Program Files (x86)\Fuse\fuse.exe`.
 * The extension allows full configuration via `settings.json` under the `sinclairBasic.*` namespace.
 

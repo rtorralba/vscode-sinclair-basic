@@ -2,8 +2,8 @@
   "name": "sinclair-basic",
   "displayName": "Sinclair BASIC (Unofficial)",
   "description": "Unofficial Sinclair BASIC language support for Visual Studio Code. Includes syntax highlighting, renumbering, optional modern syntax (jbas), TAP builder and emulator integration.",
-  "version": "0.1.0",
-  "publisher": "community",
+  "version": "1.0.0",
+  "publisher": "rtorralba",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -22,9 +22,18 @@
     "renumber",
     "fuse"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rtorralba/vscode-sinclair-basic.git"
+  },
   "main": "./src/extension.js",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.7.1"
   },
   "contributes": {
     "languages": [
@@ -67,70 +76,188 @@
     ],
     "commands": [
       {
-        "command": "sinclairBasic.renumber",
-        "title": "Sinclair BASIC: Renumber Lines",
+        "command": "sinclairBasic.compileJBas",
+        "title": "Compile JBAS to TAP",
+        "category": "Sinclair BASIC",
+        "icon": "$(package)"
+      },
+      {
+        "command": "sinclairBasic.compileJBasToTap",
+        "title": "Compile JBAS to TAP",
         "category": "Sinclair BASIC"
       },
       {
-        "command": "sinclairBasic.compileJBas",
-        "title": "Sinclair BASIC: Compile .jbas to Standard BASIC (.bas)",
+        "command": "sinclairBasic.transpileJBas",
+        "title": "Transpile JBAS to BAS",
+        "category": "Sinclair BASIC",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "sinclairBasic.compileBas",
+        "title": "Compile BAS to TAP",
+        "category": "Sinclair BASIC",
+        "icon": "$(package)"
+      },
+      {
+        "command": "sinclairBasic.renumber",
+        "title": "Renumber BAS Lines (.bas)",
+        "category": "Sinclair BASIC",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "sinclairBasic.renumberBas",
+        "title": "Renumber BAS Lines (.bas)",
         "category": "Sinclair BASIC"
       },
       {
         "command": "sinclairBasic.buildTap",
-        "title": "Sinclair BASIC: Build TAP File (bas2tap)",
-        "category": "Sinclair BASIC"
+        "title": "Build TAP File (bas2tap)",
+        "category": "Sinclair BASIC",
+        "icon": "$(package)"
       },
       {
         "command": "sinclairBasic.runEmulator",
-        "title": "Sinclair BASIC: Run in Emulator (Fuse)",
+        "title": "Run in Emulator (Fuse)",
         "category": "Sinclair BASIC",
         "icon": "$(play)"
+      },
+      {
+        "command": "sinclairBasic.selectBas2tap",
+        "title": "Select bas2tap Executable...",
+        "category": "Sinclair BASIC",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "sinclairBasic.selectEmulator",
+        "title": "Select Emulator Executable...",
+        "category": "Sinclair BASIC",
+        "icon": "$(folder-opened)"
       }
     ],
     "menus": {
-      "editor/context": [
+      "editor/title": [
         {
-          "command": "sinclairBasic.renumber",
-          "when": "editorLangId == sinclair-basic",
-          "group": "1_modification"
+          "command": "sinclairBasic.transpileJBas",
+          "when": "editorLangId == jbas",
+          "group": "navigation@1"
         },
         {
           "command": "sinclairBasic.compileJBas",
           "when": "editorLangId == jbas",
-          "group": "1_modification"
+          "group": "navigation@2"
         },
         {
-          "command": "sinclairBasic.buildTap",
-          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
-          "group": "2_build"
+          "command": "sinclairBasic.renumber",
+          "when": "editorLangId == sinclair-basic",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sinclairBasic.compileBas",
+          "when": "editorLangId == sinclair-basic",
+          "group": "navigation@2"
         },
         {
           "command": "sinclairBasic.runEmulator",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
-          "group": "2_build"
+          "group": "navigation@3"
         }
       ],
-      "editor/title": [
+      "editor/context": [
+        {
+          "command": "sinclairBasic.transpileJBas",
+          "when": "editorLangId == jbas",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "sinclairBasic.compileJBas",
+          "when": "editorLangId == jbas",
+          "group": "2_build@1"
+        },
+        {
+          "command": "sinclairBasic.renumber",
+          "when": "editorLangId == sinclair-basic",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "sinclairBasic.compileBas",
+          "when": "editorLangId == sinclair-basic",
+          "group": "2_build@1"
+        },
         {
           "command": "sinclairBasic.runEmulator",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
-          "group": "navigation"
+          "group": "2_build@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "sinclairBasic.transpileJBas",
+          "when": "resourceExtname == .jbas",
+          "group": "sinclair@1"
+        },
+        {
+          "command": "sinclairBasic.compileJBas",
+          "when": "resourceExtname == .jbas",
+          "group": "sinclair@2"
+        },
+        {
+          "command": "sinclairBasic.renumber",
+          "when": "resourceExtname == .bas",
+          "group": "sinclair@1"
+        },
+        {
+          "command": "sinclairBasic.compileBas",
+          "when": "resourceExtname == .bas",
+          "group": "sinclair@2"
+        },
+        {
+          "command": "sinclairBasic.runEmulator",
+          "when": "resourceExtname == .bas || resourceExtname == .jbas",
+          "group": "sinclair@3"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "sinclairBasic.transpileJBas",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "editorTextFocus && editorLangId == jbas"
+      },
+      {
+        "command": "sinclairBasic.compileJBas",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "editorTextFocus && editorLangId == jbas"
+      },
+      {
+        "command": "sinclairBasic.compileBas",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "editorTextFocus && editorLangId == sinclair-basic"
+      },
+      {
+        "command": "sinclairBasic.renumber",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus && editorLangId == sinclair-basic"
+      },
+      {
+        "command": "sinclairBasic.runEmulator",
+        "key": "ctrl+f5",
+        "mac": "cmd+f5",
+        "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
+      }
+    ],
     "configuration": {
       "title": "Sinclair BASIC (Unofficial)",
       "properties": {
-        "sinclairBasic.bas2tapPath": {
-          "type": "string",
-          "default": "C:\\Users\\rault\\bin\\bas2tap.exe",
-          "description": "Path to the bas2tap executable for creating ZX Spectrum .tap files."
-        },
         "sinclairBasic.emulatorPath": {
           "type": "string",
           "default": "C:\\Program Files (x86)\\Fuse\\fuse.exe",
-          "description": "Path to the ZX Spectrum emulator executable (e.g. Fuse)."
+          "description": "Path to the ZX Spectrum emulator executable (e.g. Fuse).",
+          "markdownDescription": "Path to the ZX Spectrum emulator executable (e.g. Fuse).\n\n[📁 Browse for emulator executable...](command:sinclairBasic.selectEmulator)",
+          "order": 1
         },
         "sinclairBasic.emulatorArgs": {
           "type": "array",
@@ -138,27 +265,45 @@
             "type": "string"
           },
           "default": [],
-          "description": "Additional command-line arguments to pass to the emulator."
+          "description": "Additional command-line arguments to pass to the emulator.",
+          "order": 2
         },
         "sinclairBasic.outputDirectory": {
           "type": "string",
           "default": "dist",
-          "description": "Output directory relative to the workspace root for compiled .bas and .tap files."
-        },
-        "sinclairBasic.renumberStart": {
-          "type": "number",
-          "default": 10,
-          "description": "Default start line number for the Renumber command."
-        },
-        "sinclairBasic.renumberStep": {
-          "type": "number",
-          "default": 10,
-          "description": "Default step increment between line numbers for the Renumber command."
+          "description": "Output directory relative to the workspace root for compiled .bas and .tap files.",
+          "order": 3
         },
         "sinclairBasic.autoStartLine": {
           "type": "number",
           "default": 0,
-          "description": "Autostart line number passed to bas2tap (-a flag). Set to 0 to automatically detect the first line."
+          "description": "Autostart line number passed to bas2tap (-a flag). Set to 0 to automatically detect the first line.",
+          "order": 4
+        },
+        "sinclairBasic.useExternalBas2Tap": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set to true to use an external bas2tap executable instead of the built-in native pure JavaScript TAP generator.",
+          "order": 5
+        },
+        "sinclairBasic.bas2tapPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the bas2tap executable for creating ZX Spectrum .tap files (only if useExternalBas2Tap is enabled).",
+          "markdownDescription": "Path to the bas2tap executable for creating ZX Spectrum .tap files (only if useExternalBas2Tap is enabled).\n\n[📁 Browse for bas2tap executable...](command:sinclairBasic.selectBas2tap)",
+          "order": 6
+        },
+        "sinclairBasic.renumberStart": {
+          "type": "number",
+          "default": 10,
+          "description": "Default start line number for the Renumber command.",
+          "order": 7
+        },
+        "sinclairBasic.renumberStep": {
+          "type": "number",
+          "default": 10,
+          "description": "Default step increment between line numbers for the Renumber command.",
+          "order": 8
         }
       }
     }

@@ -120,6 +120,7 @@ function compileJBas(sourceText, options = {}) {
   // PASS 1: Strip comments, collect labels, identify statements
   const statements = [];
   let pendingLabels = [];
+  const seenLabels = new Map(); // labelName -> origLineNum
 
   for (let idx = 0; idx < rawLines.length; idx++) {
     const origLineNum = idx + 1;
@@ -135,8 +136,11 @@ function compileJBas(sourceText, options = {}) {
       const labelMatch = line.match(/^@([a-zA-Z0-9_]+):\s*(.*)$/);
       if (labelMatch) {
         const labelName = labelMatch[1];
-        if (labelMap.has(labelName) || pendingLabels.includes(labelName)) {
-          warnings.push(`Line ${origLineNum}: Duplicate label definition '@${labelName}'`);
+        if (seenLabels.has(labelName)) {
+          const prevLine = seenLabels.get(labelName);
+          errors.push(`Line ${origLineNum}: Duplicate label definition '@${labelName}' (previously defined on line ${prevLine})`);
+        } else {
+          seenLabels.set(labelName, origLineNum);
         }
         pendingLabels.push(labelName);
         line = labelMatch[2].trim();

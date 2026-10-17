@@ -1,4 +1,4 @@
-﻿# AI Agent Context & Guidelines (AGENTS.md)
+# AI Agent Context & Guidelines (AGENTS.md)
 
 Welcome! This document provides complete context for any AI agent working on the **Sinclair BASIC (Unofficial)** VS Code Extension (`vscode-sinclair-basic`).
 
@@ -32,7 +32,7 @@ Welcome! This document provides complete context for any AI agent working on the
 ## 3. Toolchain & User Environment
 
 In the author's local environment, the tools are configured as:
-* **bas2tap**: `C:\Users\rault\bin\bas2tap.exe` (compiles `.bas` to `.tap` tape image with autostart `-a<line>`).
+* **bas2tap**: `C:\Users\user\bin\bas2tap.exe` (compiles `.bas` to `.tap` tape image with autostart `-a<line>`).
 * **Fuse Emulator**: `C:\Program Files (x86)\Fuse\fuse.exe`.
 * The extension allows full configuration via `settings.json` under the `sinclairBasic.*` namespace.
 
@@ -54,12 +54,14 @@ vscode-sinclair-basic/
 |   |-- extension.js                     # VS Code Extension entry point & command registrations
 |   +-- core/
 |       |-- renumber.js                  # Core engine: Sinclair BASIC line renumbering & jump target updates
-|       +-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
+|       |-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
+|       +-- tapGenerator.js              # Core engine: Native Pure JS ZX Spectrum .tap generator
 |-- test/
 |   |-- fixtures/
 |   |   +-- sample.bas                   # Test fixture with jump matrix
 |   |-- renumber.test.js                 # Unit tests for renumbering engine
-|   +-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
+|   |-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
+|   +-- tapGenerator.test.js             # Unit tests for pure JS tap generator
 |-- AGENTS.md                            # Complete AI instructions (this file)
 |-- GEMINI.md                            # Mirrored AI instructions for Gemini / Antigravity
 |-- README.md                            # User-facing documentation & quickstart
@@ -84,14 +86,16 @@ vscode-sinclair-basic/
    - Detects and reports undefined labels and duplicate definitions.
 
 3. **VS Code Extension Integration (`src/extension.js`)**:
-   - `sinclairBasic.renumber`: Renumbers lines directly in active editor with undo/redo support (`editor.edit`).
-   - `sinclairBasic.compileJBas`: Compiles `.jbas` to `dist/<filename>.bas` and opens it in editor side-by-side.
-   - `sinclairBasic.buildTap`: Compiles `.bas` or `.jbas` to `dist/<filename>.tap` via `bas2tap`.
-   - `sinclairBasic.runEmulator`: Builds TAP and launches configured emulator.
-   - Context menus in editor and play button in editor title bar.
+   - `sinclairBasic.compileJBas`: Compiles `.jbas` to compact intermediate `dist/<filename>.bas` (numbered 1 by 1) and builds `dist/<filename>.tap` via `bas2tap` without opening the intermediate `.bas` file (`Ctrl+Shift+B`).
+   - `sinclairBasic.transpileJBas`: Transpiles `.jbas` to `dist/<filename>.bas` (numbered 10 by 10) and opens it in editor. Does not generate `.tap` (`Ctrl+Shift+T`).
+   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compiles `.bas` to `dist/<filename>.tap` via `bas2tap` (`Ctrl+Shift+B`).
+   - `sinclairBasic.renumber` / `sinclairBasic.renumberBas`: Renumbers lines directly in active editor with jump updates and undo/redo support (`Ctrl+Alt+R`).
+   - `sinclairBasic.runEmulator`: Builds TAP and launches configured emulator (`Ctrl+F5`).
+   - Full integration with Editor Toolbar (`editor/title`), Editor Context menu (`editor/context`), Explorer File menu (`explorer/context`), and Command Palette.
+
 
 4. **Automated Tests**:
-   - Running with `npm test` (`node --test test/*.test.js`). 11 passing tests.
+   - Running with `npm test` (`node --test test/*.test.js`). 17 passing tests.
 
 ---
 

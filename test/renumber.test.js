@@ -1,4 +1,4 @@
-﻿const test = require('node:test');
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -119,6 +119,8 @@ test('renumberFile handles file output and backup', () => {
   // Clean up tmp files
   fs.unlinkSync(tmpFile);
   fs.unlinkSync(backupFile);
-  fs.rmdirSync(tmpDir);
+  if (fs.existsSync(tmpDir)) {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 

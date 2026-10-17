@@ -22,8 +22,14 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
   * Develop without managing line numbers manually.
   * Define structured jump targets with labels: `@label:`.
   * Jump cleanly using `GO TO @label`, `GO SUB @label`, `THEN @label`, etc.
+  * **Go to Definition (`Ctrl+Click` / `F12`)**: Hover over any `@label` with Ctrl or click to jump straight to its `@label:` definition.
+  * **Rename Symbol (`F2`)**: Press `F2` on any label to rename all occurrences and definitions safely across the document.
+  * **Find References (`Shift+F12`)**: Inspect every place where `@label` is called.
+  * **Outline & Breadcrumbs**: Displays all `@labels` in VS Code's Outline view and Symbol Search (`Ctrl+Shift+O`).
+  * **Automatic Indentation**: Writing `@label:` and pressing `Enter` automatically indents the code block inwards.
+  * **Duplicate Label Detection**: Flags duplicate label definitions with real-time error diagnostics in the editor and halts compilation with line details.
   * Single-quote inline comments: `' this is a comment` (preserving single quotes inside string literals like `PRINT "DON'T"`).
-  * Transpiles to clean, standard numbered `.bas` with a single click or shortcut.
+  * Transpiles to clean, standard numbered `.bas` or compiles directly to `.tap`.
 
 ### 2. Intelligent Line Renumbering (`.bas`)
 * Renumbers program lines starting at line 10 with step 10 (or user-configured values).
@@ -38,23 +44,25 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
 * **Zero false positives**: Strings (`PRINT "GOTO 10"`) and `REM` comments are completely untouched.
 
 ### 3. Integrated Toolchain & Emulation
-* **Build TAP File**: Direct integration with `bas2tap`. Automatically detects the first line for the autostart flag (`-a<line>`).
+* **Built-in Pure JavaScript TAP Generator**: Blazing fast, zero external dependencies (no `bas2tap` executable required). Automatically encodes Sinclair BASIC keywords, Spectrum floating-point numbers, UDGs, and headers with autostart line. An optional fallback to external `bas2tap` is available via settings.
 * **Run in Emulator**: One-click build and launch in your favorite ZX Spectrum emulator (e.g. Fuse, CSpect, Retro Virtual Machine).
 
 ---
 
-## Commands
+## Commands & Shortcuts
 
-All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and context menus:
+All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`), the editor toolbar (top-right buttons), editor context menu, and Explorer file context menu:
 
-| Command | Identifier | Description |
-|---|---|---|
-| **Sinclair BASIC: Renumber Lines** | `sinclairBasic.renumber` | Renumbers lines in the active `.bas` document and updates all jump references. |
-| **Sinclair BASIC: Compile .jbas to Standard BASIC** | `sinclairBasic.compileJBas` | Compiles the active `.jbas` file into a numbered `.bas` file in the output directory. |
-| **Sinclair BASIC: Build TAP File (bas2tap)** | `sinclairBasic.buildTap` | Compiles active `.bas` or `.jbas` to a ZX Spectrum `.tap` tape image. |
-| **Sinclair BASIC: Run in Emulator (Fuse)** | `sinclairBasic.runEmulator` | Builds the TAP file and opens it in the configured emulator. |
+| Command | Identifier | Shortcut | Description |
+|---|---|---|---|
+| **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Numbers lines 1 by 1, builds `.tap` without opening the intermediate `.bas`. |
+| **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Numbers lines 10 by 10, saves `.bas` and opens it in editor. Does not generate `.tap`. |
+| **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` to a ZX Spectrum `.tap` tape image using `bas2tap`. |
+| **Renumber BAS Lines (.bas)** | `sinclairBasic.renumber` / `renumberBas` | `Ctrl+Alt+R` | Renumbers lines in `.bas` (10 by 10) and updates all jump references (`GOTO`, `GOSUB`, `RESTORE`, etc.). |
+| **Run in Emulator (Fuse)** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured ZX Spectrum emulator. |
 
 ---
+
 
 ## Configuration Settings
 
@@ -62,7 +70,7 @@ You can customize the extension via VS Code Settings (`settings.json`):
 
 ```json
 {
-  "sinclairBasic.bas2tapPath": "C:\\Users\\rault\\bin\\bas2tap.exe",
+  "sinclairBasic.bas2tapPath": "C:\\tools\\bas2tap.exe",
   "sinclairBasic.emulatorPath": "C:\\Program Files (x86)\\Fuse\\fuse.exe",
   "sinclairBasic.emulatorArgs": [],
   "sinclairBasic.outputDirectory": "dist",
@@ -78,9 +86,11 @@ You can customize the extension via VS Code Settings (`settings.json`):
 
 ## Development & Debugging
 
-1. Open this repository in Visual Studio Code:
+1. Clone and open this repository in Visual Studio Code:
    ```bash
-   code C:\Users\rault\dev\basic\vscode-sinclair-basic
+   git clone https://github.com/rtorralba/vscode-sinclair-basic.git
+   cd vscode-sinclair-basic
+   code .
    ```
 2. Press **`F5`** (or go to *Run and Debug* -> *Run Sinclair BASIC Extension*).
 3. A new Extension Development Host window will open.

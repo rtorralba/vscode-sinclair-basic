@@ -1,0 +1,10 @@
+.vscode/**
+.vscode-test/**
+test/**
+.git/**
+.gitignore
+.cursorrules
+AGENTS.md
+GEMINI.md
+build.bat
+*.vsix
