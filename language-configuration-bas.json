@@ -1,0 +1,41 @@
+{
+  "comments": {
+    "lineComment": "REM "
+  },
+  "brackets": [
+    [
+      "(",
+      ")"
+    ]
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "\"",
+      "close": "\"",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    }
+  ],
+  "surroundingPairs": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "\"",
+      "\""
+    ]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*\\d+\\s+(FOR|GO\\s*SUB|GOSUB)",
+      "end": "^\\s*\\d+\\s+(NEXT|RETURN)"
+    }
+  }
+}

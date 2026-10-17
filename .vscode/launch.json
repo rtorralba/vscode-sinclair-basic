@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Sinclair BASIC Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ]
+    },
+    {
+      "name": "Run Tests",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
+      "stopOnEntry": false,
+      "args": [
+        "--timeout",
+        "999999"
+      ],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
