@@ -28,7 +28,7 @@
   },
   "main": "./src/extension.js",
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node -c src/extension.js && node --test test/*.test.js",
     "package": "vsce package",
     "publish": "vsce publish"
   },
@@ -117,9 +117,21 @@
       },
       {
         "command": "sinclairBasic.runEmulator",
-        "title": "Run in Emulator (Fuse)",
+        "title": "Run in Emulator",
         "category": "Sinclair BASIC",
         "icon": "$(play)"
+      },
+      {
+        "command": "sinclairBasic.runTurbo80",
+        "title": "Run in Web Emulator (Turbo80)",
+        "category": "Sinclair BASIC",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "sinclairBasic.runExternalEmulator",
+        "title": "Run in External Emulator (Fuse)",
+        "category": "Sinclair BASIC",
+        "icon": "$(terminal)"
       },
       {
         "command": "sinclairBasic.selectBas2tap",
@@ -252,12 +264,46 @@
     "configuration": {
       "title": "Sinclair BASIC (Unofficial)",
       "properties": {
+        "sinclairBasic.emulatorType": {
+          "type": "string",
+          "enum": [
+            "turbo80",
+            "external"
+          ],
+          "enumDescriptions": [
+            "Built-in Turbo80 web emulator inside VS Code (no installation required).",
+            "External desktop emulator (e.g. Fuse, RetroArch, etc.)."
+          ],
+          "default": "turbo80",
+          "description": "Emulator engine to use when running BASIC programs.",
+          "order": 1
+        },
+        "sinclairBasic.turbo80Model": {
+          "type": "string",
+          "enum": [
+            "48k",
+            "128k",
+            "plus2",
+            "plus2a",
+            "plus3",
+            "16k"
+          ],
+          "default": "48k",
+          "description": "ZX Spectrum model to emulate in the built-in Turbo80 web emulator.",
+          "order": 2
+        },
+        "sinclairBasic.turbo80Crt": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable CRT screen shader effect in Turbo80.",
+          "order": 3
+        },
         "sinclairBasic.emulatorPath": {
           "type": "string",
           "default": "C:\\Program Files (x86)\\Fuse\\fuse.exe",
-          "description": "Path to the ZX Spectrum emulator executable (e.g. Fuse).",
-          "markdownDescription": "Path to the ZX Spectrum emulator executable (e.g. Fuse).\n\n[📁 Browse for emulator executable...](command:sinclairBasic.selectEmulator)",
-          "order": 1
+          "description": "Path to the ZX Spectrum emulator executable (only used if emulatorType is set to 'external').",
+          "markdownDescription": "Path to the ZX Spectrum emulator executable (only used if emulatorType is set to 'external').\n\n[📁 Browse for emulator executable...](command:sinclairBasic.selectEmulator)",
+          "order": 4
         },
         "sinclairBasic.emulatorArgs": {
           "type": "array",
@@ -265,45 +311,45 @@
             "type": "string"
           },
           "default": [],
-          "description": "Additional command-line arguments to pass to the emulator.",
-          "order": 2
+          "description": "Additional command-line arguments to pass to the external emulator.",
+          "order": 5
         },
         "sinclairBasic.outputDirectory": {
           "type": "string",
           "default": "dist",
           "description": "Output directory relative to the workspace root for compiled .bas and .tap files.",
-          "order": 3
+          "order": 6
         },
         "sinclairBasic.autoStartLine": {
           "type": "number",
           "default": 0,
           "description": "Autostart line number passed to bas2tap (-a flag). Set to 0 to automatically detect the first line.",
-          "order": 4
+          "order": 7
         },
         "sinclairBasic.useExternalBas2Tap": {
           "type": "boolean",
           "default": false,
           "description": "Set to true to use an external bas2tap executable instead of the built-in native pure JavaScript TAP generator.",
-          "order": 5
+          "order": 8
         },
         "sinclairBasic.bas2tapPath": {
           "type": "string",
           "default": "",
           "description": "Path to the bas2tap executable for creating ZX Spectrum .tap files (only if useExternalBas2Tap is enabled).",
           "markdownDescription": "Path to the bas2tap executable for creating ZX Spectrum .tap files (only if useExternalBas2Tap is enabled).\n\n[📁 Browse for bas2tap executable...](command:sinclairBasic.selectBas2tap)",
-          "order": 6
+          "order": 9
         },
         "sinclairBasic.renumberStart": {
           "type": "number",
           "default": 10,
           "description": "Default start line number for the Renumber command.",
-          "order": 7
+          "order": 10
         },
         "sinclairBasic.renumberStep": {
           "type": "number",
           "default": 10,
           "description": "Default step increment between line numbers for the Renumber command.",
-          "order": 8
+          "order": 11
         }
       }
     }

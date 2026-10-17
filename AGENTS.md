@@ -85,17 +85,30 @@ vscode-sinclair-basic/
      - Pass 2: Substitutes `@label` references outside strings with mapped line numbers.
    - Detects and reports undefined labels and duplicate definitions.
 
-3. **VS Code Extension Integration (`src/extension.js`)**:
-   - `sinclairBasic.compileJBas`: Compiles `.jbas` to compact intermediate `dist/<filename>.bas` (numbered 1 by 1) and builds `dist/<filename>.tap` via `bas2tap` without opening the intermediate `.bas` file (`Ctrl+Shift+B`).
+3. **Pure JavaScript TAP Generator (`src/core/tapGenerator.js`)**:
+   - Native Sinclair BASIC tokenizer and ZX Spectrum `.tap` generator written in pure JS.
+   - Encodes Sinclair BASIC token bytes (0x80-0xFF), ZX Spectrum floating-point numbers, UDGs, and line lengths.
+   - Zero external binary requirements (no `bas2tap.exe` needed by default).
+
+4. **Integrated Web Emulator: Turbo80 (`src/extension.js`)**:
+   - Integrated VS Code Webview panel embedding [Turbo80](https://turbo80.com) (by José Enrique García (Incinerator)).
+   - Passes the generated `.tap` file directly via memory/base64 without uploading to external servers.
+   - Authentic audio, CRT shader effects, 48K/128K machine models, and on-screen keyboard.
+   - Explicit attribution footer in the Webview: `Emulado con Turbo80 — Emulador de ZX Spectrum por José Enrique García (Incinerator)`.
+   - Allows falling back to external desktop emulators (Fuse, etc.) if configured.
+
+5. **VS Code Extension Integration (`src/extension.js`)**:
+   - `sinclairBasic.compileJBas`: Compiles `.jbas` to compact intermediate `dist/<filename>.bas` (numbered 1 by 1) and builds `dist/<filename>.tap` natively (`Ctrl+Shift+B`).
    - `sinclairBasic.transpileJBas`: Transpiles `.jbas` to `dist/<filename>.bas` (numbered 10 by 10) and opens it in editor. Does not generate `.tap` (`Ctrl+Shift+T`).
-   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compiles `.bas` to `dist/<filename>.tap` via `bas2tap` (`Ctrl+Shift+B`).
+   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compiles `.bas` to `dist/<filename>.tap` natively (`Ctrl+Shift+B`).
    - `sinclairBasic.renumber` / `sinclairBasic.renumberBas`: Renumbers lines directly in active editor with jump updates and undo/redo support (`Ctrl+Alt+R`).
-   - `sinclairBasic.runEmulator`: Builds TAP and launches configured emulator (`Ctrl+F5`).
+   - `sinclairBasic.runEmulator`: Builds TAP and launches Turbo80 Webview (or external Fuse) (`Ctrl+F5`).
+   - `sinclairBasic.runTurbo80`: Explicitly launches Turbo80 Webview.
+   - `sinclairBasic.runExternalEmulator`: Explicitly launches external desktop emulator.
    - Full integration with Editor Toolbar (`editor/title`), Editor Context menu (`editor/context`), Explorer File menu (`explorer/context`), and Command Palette.
 
-
-4. **Automated Tests**:
-   - Running with `npm test` (`node --test test/*.test.js`). 17 passing tests.
+6. **Automated Tests**:
+   - Running with `npm test` (`node -c src/extension.js && node --test test/*.test.js`). 20 passing tests.
 
 ---
 

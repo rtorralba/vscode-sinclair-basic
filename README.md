@@ -45,7 +45,8 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
 
 ### 3. Integrated Toolchain & Emulation
 * **Built-in Pure JavaScript TAP Generator**: Blazing fast, zero external dependencies (no `bas2tap` executable required). Automatically encodes Sinclair BASIC keywords, Spectrum floating-point numbers, UDGs, and headers with autostart line. An optional fallback to external `bas2tap` is available via settings.
-* **Run in Emulator**: One-click build and launch in your favorite ZX Spectrum emulator (e.g. Fuse, CSpect, Retro Virtual Machine).
+* **Built-in Web Emulator (Turbo80)**: Instant execution inside a VS Code tab with zero external installs. Features authentic audio, CRT shader effects, 48K/128K model selection, and on-screen keyboard support.
+* **External Desktop Emulator Support**: One-click build and launch in external emulators (e.g. Fuse, CSpect, Retro Virtual Machine) if preferred.
 
 ---
 
@@ -57,9 +58,11 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shif
 |---|---|---|---|
 | **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Numbers lines 1 by 1, builds `.tap` without opening the intermediate `.bas`. |
 | **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Numbers lines 10 by 10, saves `.bas` and opens it in editor. Does not generate `.tap`. |
-| **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` to a ZX Spectrum `.tap` tape image using `bas2tap`. |
+| **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` to a ZX Spectrum `.tap` tape image using native pure JS engine. |
 | **Renumber BAS Lines (.bas)** | `sinclairBasic.renumber` / `renumberBas` | `Ctrl+Alt+R` | Renumbers lines in `.bas` (10 by 10) and updates all jump references (`GOTO`, `GOSUB`, `RESTORE`, etc.). |
-| **Run in Emulator (Fuse)** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured ZX Spectrum emulator. |
+| **Run in Emulator** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured emulator (built-in Turbo80 Webview or external Fuse). |
+| **Run in Web Emulator (Turbo80)** | `sinclairBasic.runTurbo80` | — | Forces execution in the built-in Turbo80 web emulator tab. |
+| **Run in External Emulator** | `sinclairBasic.runExternalEmulator` | — | Forces execution in the configured external desktop emulator. |
 
 ---
 
@@ -70,17 +73,28 @@ You can customize the extension via VS Code Settings (`settings.json`):
 
 ```json
 {
-  "sinclairBasic.bas2tapPath": "C:\\tools\\bas2tap.exe",
+  "sinclairBasic.emulatorType": "turbo80",
+  "sinclairBasic.turbo80Model": "48k",
+  "sinclairBasic.turbo80Crt": true,
   "sinclairBasic.emulatorPath": "C:\\Program Files (x86)\\Fuse\\fuse.exe",
   "sinclairBasic.emulatorArgs": [],
   "sinclairBasic.outputDirectory": "dist",
+  "sinclairBasic.autoStartLine": 0,
   "sinclairBasic.renumberStart": 10,
-  "sinclairBasic.renumberStep": 10,
-  "sinclairBasic.autoStartLine": 0
+  "sinclairBasic.renumberStep": 10
 }
 ```
 
+* `sinclairBasic.emulatorType`: Set to `"turbo80"` (default, opens embedded web emulator) or `"external"` (launches Fuse or desktop emulator).
+* `sinclairBasic.turbo80Model`: Emulated ZX Spectrum machine (`48k`, `128k`, `plus2`, `plus2a`, `plus3`, `16k`).
+* `sinclairBasic.turbo80Crt`: Enables/disables authentic CRT television shader filter.
 * `sinclairBasic.autoStartLine`: When set to `0`, the extension automatically detects the first line number in the BASIC file.
+
+---
+
+## Acknowledgements & Credits
+
+* **Turbo80**: The built-in web emulator is powered by [Turbo80](https://turbo80.com) created by José Enrique García (Incinerator). We are deeply grateful for this wonderful web-based ZX Spectrum emulator.
 
 ---
 

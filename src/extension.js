@@ -315,22 +315,277 @@ function activate(context) {
     }
   }
 
-  // Command: Run in Emulator
+  // Webview panel reference for Turbo80
+  let currentTurbo80Panel = null;
+
+  function getTurbo80Html() {
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    script-src 'unsafe-inline' https://turbo80.com;
+    frame-src https://turbo80.com;
+    style-src 'unsafe-inline';
+    img-src https: data:;
+    connect-src https://turbo80.com;
+  ">
+  <title>Turbo80 - ZX Spectrum</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #0c0c11;
+      color: #e9e9f2;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    #emulator-wrap {
+      flex: 1;
+      width: 100%;
+      height: calc(100% - 34px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    #spectrum {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #spectrum iframe {
+      border: 0;
+      width: 100%;
+      height: 100%;
+      max-width: 100vw;
+      max-height: 100vh;
+    }
+    #footer {
+      height: 34px;
+      background: #14141e;
+      border-top: 1px solid #28283a;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1.2rem;
+      font-size: 12px;
+      color: #9b9bb0;
+      user-select: none;
+      flex-shrink: 0;
+    }
+    #footer a {
+      color: #37d0ff;
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.15s ease;
+    }
+    #footer a:hover {
+      color: #57ef9e;
+      text-decoration: underline;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #57ef9e;
+      box-shadow: 0 0 8px rgba(87, 239, 158, 0.7);
+    }
+    .attribution {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="emulator-wrap">
+    <div id="spectrum"></div>
+  </div>
+  <footer id="footer">
+    <div class="status-badge">
+      <span class="status-dot"></span>
+      <span id="game-title">Iniciando ZX Spectrum...</span>
+    </div>
+    <div class="attribution">
+      Emulado con <a href="https://turbo80.com" target="_blank" rel="noopener">Turbo80</a> &bull; Emulador de ZX Spectrum por Jos&eacute; Enrique Garc&iacute;a (Incinerator)
+    </div>
+  </footer>
+
+  <script src="https://turbo80.com/turbo80.js"></script>
+  <script>
+    const vscode = acquireVsCodeApi();
+    let emulator = null;
+    let pendingData = null;
+
+    function applyTap(data) {
+      try {
+        const binaryString = atob(data.base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const currentModel = data.model || '48k';
+        document.getElementById('game-title').textContent = (data.filename || 'game.tap') + ' (' + currentModel.toUpperCase() + ')';
+
+        if (typeof Turbo80 === 'undefined') {
+          document.getElementById('game-title').textContent = 'Error cargando Turbo80 (comprueba tu conexi\u00f3n a internet)';
+          return;
+        }
+
+        if (!emulator) {
+          emulator = Turbo80(document.getElementById('spectrum'), {
+            load: bytes,
+            name: data.filename || 'game.tap',
+            model: currentModel,
+            crt: data.crt ? 'on' : 'off',
+            iframe: true
+          });
+        } else {
+          const doLoad = () => emulator.load(bytes, data.filename || 'game.tap');
+          if (emulator.setModel) {
+            Promise.resolve(emulator.setModel(currentModel))
+              .then(() => {
+                if (emulator.reset) emulator.reset();
+                return doLoad();
+              })
+              .catch(doLoad);
+          } else {
+            doLoad();
+          }
+        }
+      } catch (err) {
+        console.error('Error loading TAP into Turbo80:', err);
+        document.getElementById('game-title').textContent = 'Error al cargar TAP: ' + err.message;
+      }
+    }
+
+    window.addEventListener('message', event => {
+      const msg = event.data;
+      if (msg.command === 'loadTap') {
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+          applyTap(msg);
+        } else {
+          pendingData = msg;
+        }
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (pendingData) {
+        applyTap(pendingData);
+        pendingData = null;
+      }
+      vscode.postMessage({ command: 'ready' });
+    });
+  </script>
+</body>
+</html>`;
+  }
+
+  function runTurbo80Webview(tapPath) {
+    const config = vscode.workspace.getConfiguration('sinclairBasic');
+    const model = config.get('turbo80Model', '48k') || '48k';
+    const crt = config.get('turbo80Crt', true);
+    const filename = path.basename(tapPath);
+    const tapBuffer = fs.readFileSync(tapPath);
+    const base64 = tapBuffer.toString('base64');
+
+    const payload = {
+      command: 'loadTap',
+      base64,
+      filename,
+      model,
+      crt
+    };
+
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.reveal(vscode.ViewColumn.Beside);
+      currentTurbo80Panel.title = `ZX: ${filename}`;
+      currentTurbo80Panel.webview.postMessage(payload);
+    } else {
+      currentTurbo80Panel = vscode.window.createWebviewPanel(
+        'sinclairBasicTurbo80',
+        `ZX: ${filename}`,
+        vscode.ViewColumn.Beside,
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true
+        }
+      );
+
+      currentTurbo80Panel.webview.html = getTurbo80Html();
+
+      currentTurbo80Panel.webview.onDidReceiveMessage(message => {
+        if (message.command === 'ready') {
+          currentTurbo80Panel.webview.postMessage(payload);
+        }
+      });
+
+      currentTurbo80Panel.onDidDispose(() => {
+        currentTurbo80Panel = null;
+      });
+    }
+  }
+
+  function launchExternalEmulator(tapPath) {
+    const config = vscode.workspace.getConfiguration('sinclairBasic');
+    const emulatorPath = config.get('emulatorPath', 'fuse');
+    const emulatorArgs = config.get('emulatorArgs', []);
+    const allArgs = [...emulatorArgs, tapPath];
+
+    execFile(emulatorPath, allArgs, (error) => {
+      if (error && error.code !== 0) {
+        vscode.window.showErrorMessage(`Failed to launch external emulator (${emulatorPath}): ${error.message}`);
+      }
+    });
+  }
+
+  // Command: Run in Emulator (Turbo80 Web by default, or External if configured)
   async function handleRunEmulator(uri) {
     const tapPath = await handleCompileBas(uri);
     if (!tapPath) return;
 
     const config = vscode.workspace.getConfiguration('sinclairBasic');
-    const emulatorPath = config.get('emulatorPath', 'fuse');
-    const emulatorArgs = config.get('emulatorArgs', []);
+    const emulatorType = config.get('emulatorType', 'turbo80');
 
-    const allArgs = [...emulatorArgs, tapPath];
+    if (emulatorType === 'external') {
+      launchExternalEmulator(tapPath);
+    } else {
+      runTurbo80Webview(tapPath);
+    }
+  }
 
-    execFile(emulatorPath, allArgs, (error) => {
-      if (error && error.code !== 0) {
-        vscode.window.showErrorMessage(`Failed to launch emulator (${emulatorPath}): ${error.message}`);
-      }
-    });
+  // Command: Explicitly Run in Turbo80 Web Emulator
+  async function handleRunTurbo80(uri) {
+    const tapPath = await handleCompileBas(uri);
+    if (!tapPath) return;
+    runTurbo80Webview(tapPath);
+  }
+
+  // Command: Explicitly Run in External Emulator
+  async function handleRunExternalEmulator(uri) {
+    const tapPath = await handleCompileBas(uri);
+    if (!tapPath) return;
+    launchExternalEmulator(tapPath);
   }
 
   // Command: Browse and select bas2tap executable
@@ -615,6 +870,8 @@ function activate(context) {
 
     // Run in Emulator
     vscode.commands.registerCommand('sinclairBasic.runEmulator', handleRunEmulator),
+    vscode.commands.registerCommand('sinclairBasic.runTurbo80', handleRunTurbo80),
+    vscode.commands.registerCommand('sinclairBasic.runExternalEmulator', handleRunExternalEmulator),
 
     // Select Executables (Browse dialogs for Settings UI)
     vscode.commands.registerCommand('sinclairBasic.selectBas2tap', handleSelectBas2tap),
