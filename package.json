@@ -27,13 +27,17 @@
     "url": "https://github.com/rtorralba/vscode-sinclair-basic.git"
   },
   "main": "./src/extension.js",
+  "browser": "./dist/webExtension.js",
   "scripts": {
-    "test": "node -c src/extension.js && node --test test/*.test.js",
-    "package": "vsce package",
+    "build-web": "esbuild ./src/webExtension.js --bundle --format=cjs --platform=browser --external:vscode --external:fs --external:path --outfile=dist/webExtension.js",
+    "vscode:prepublish": "npm run build-web",
+    "test": "node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js",
+    "package": "npm run build-web && vsce package",
     "publish": "vsce publish"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.7.1"
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.28.2"
   },
   "contributes": {
     "languages": [

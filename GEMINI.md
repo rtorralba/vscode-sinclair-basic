@@ -51,11 +51,14 @@ vscode-sinclair-basic/
 |-- language-configuration-bas.json      # Brackets, auto-closing & folding for .bas
 |-- language-configuration-jbas.json     # Plegado y comentarios para .jbas
 |-- src/
-|   |-- extension.js                     # VS Code Extension entry point & command registrations
+|   |-- extension.js                     # VS Code Desktop Extension entry point
+|   |-- webExtension.js                  # VS Code Web Extension entry point (vscode.dev / github.dev)
 |   +-- core/
 |       |-- renumber.js                  # Core engine: Sinclair BASIC line renumbering & jump target updates
 |       |-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
 |       +-- tapGenerator.js              # Core engine: Native Pure JS ZX Spectrum .tap generator
+|-- dist/
+|   +-- webExtension.js                  # Bundled single-file web extension (built via esbuild)
 |-- test/
 |   |-- fixtures/
 |   |   +-- sample.bas                   # Test fixture with jump matrix

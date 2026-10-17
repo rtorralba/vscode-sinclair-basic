@@ -15,8 +15,19 @@
  *     node renumber.js file.bas --start 10 --step 10
  */
 
-const fs = require('fs');
-const path = require('path');
+let fs;
+try {
+  fs = require('fs');
+} catch {
+  fs = null;
+}
+
+let path;
+try {
+  path = require('path');
+} catch {
+  path = null;
+}
 
 /**
  * Checks if a character is alphanumeric (a-z, A-Z, 0-9).

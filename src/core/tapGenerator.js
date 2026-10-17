@@ -9,8 +9,19 @@
 // Special thanks to Remy Sharp's txt2bas (https://github.com/remy/txt2bas)
 // which helped identify and fix some edge cases in the tokenization process.
 
-const fs = require('fs');
-const path = require('path');
+let fs;
+try {
+  fs = require('fs');
+} catch {
+  fs = null;
+}
+
+let path;
+try {
+  path = require('path');
+} catch {
+  path = null;
+}
 
 // ZX Spectrum BASIC keywords to token codes
 const KEYWORDS = {
@@ -305,7 +316,7 @@ function tap2buffer(blocks) {
     tapData.set(b, offset);
     offset += b.length;
   });
-  return Buffer.from(tapData.buffer);
+  return typeof Buffer !== 'undefined' ? Buffer.from(tapData.buffer) : tapData;
 }
 
 /**
@@ -316,21 +327,22 @@ function tap2buffer(blocks) {
  * @param {Object} [options]
  * @param {string} [options.filename] Tape block name
  * @param {number} [options.autostart] Autostart line number
- * @returns {{ tapPath: string, autoStartLine: number, bytesCount: number }}
+ * @returns {{ tapPath: string, autoStartLine: number, bytesCount: number, data: Uint8Array }}
  */
 function generateTapFile(basicCode, targetTapPath, options = {}) {
-  const baseName = options.filename || path.basename(targetTapPath, '.tap');
+  const baseName = options.filename || (path ? path.basename(targetTapPath, '.tap') : 'program');
   const autostart = options.autostart || 0;
 
   const blocks = bas2tap(basicCode, baseName, autostart);
   const buffer = tap2buffer(blocks);
 
-  const dir = path.dirname(targetTapPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (fs && path) {
+    const dir = path.dirname(targetTapPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(targetTapPath, buffer);
   }
-
-  fs.writeFileSync(targetTapPath, buffer);
 
   // Read back actual autostart line from header
   const autoStartLine = blocks[0][3 + 13] | (blocks[0][3 + 14] << 8);
@@ -338,7 +350,8 @@ function generateTapFile(basicCode, targetTapPath, options = {}) {
   return {
     tapPath: targetTapPath,
     autoStartLine,
-    bytesCount: buffer.length
+    bytesCount: buffer.length,
+    data: buffer
   };
 }
 

@@ -10,8 +10,19 @@
  *  - Outputs clean numbered Sinclair BASIC ready for bas2tap.
  */
 
-const fs = require('fs');
-const path = require('path');
+let fs;
+try {
+  fs = require('fs');
+} catch {
+  fs = null;
+}
+
+let path;
+try {
+  path = require('path');
+} catch {
+  path = null;
+}
 
 /**
  * Strips single quote comments ('...) from a line while respecting string literals.
