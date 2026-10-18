@@ -2,8 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   stripComments,
+  convertCommentsToRem,
   replaceLabelsOutsideStrings,
-  compileJBas
+  compileJBas,
+  transpileJBasAllVersions
 } = require('../src/core/jbas2bas.js');
 
 test('stripComments strips single quote comments outside string literals', () => {
@@ -86,5 +88,88 @@ STOP
   assert.equal(res.errors.length, 1);
   assert.match(res.errors[0], /Duplicate label definition '@start'/);
   assert.match(res.errors[0], /previously defined on line 2/);
+});
+
+test('convertCommentsToRem converts single-quote comments to Sinclair BASIC REM', () => {
+  assert.equal(convertCommentsToRem("' Single comment"), 'REM Single comment');
+  assert.equal(convertCommentsToRem("LET a=1 ' inline comment"), 'LET a=1: REM inline comment');
+  assert.equal(convertCommentsToRem('PRINT "DON\'T PANIC" \' comment'), 'PRINT "DON\'T PANIC": REM comment');
+  assert.equal(convertCommentsToRem('LET a=1: \' comment'), 'LET a=1: REM comment');
+  assert.equal(convertCommentsToRem('REM already rem'), 'REM already rem');
+});
+
+test('compileJBas with keepComments converts comments to numbered REM lines and preserves jumps', () => {
+  const source = `
+' Title Comment
+DIM a(5)
+' Inline loop comment
+@loop:
+LET a(1)=1 ' Set array
+GO TO @loop
+`;
+
+  const res = compileJBas(source, { start: 10, step: 10, keepComments: true });
+  assert.equal(res.success, true);
+  const lines = res.text.trim().split(/\r?\n/);
+  assert.equal(lines[0], '10 REM Title Comment');
+  assert.equal(lines[1], '20 DIM a(5)');
+  assert.equal(lines[2], '30 REM Inline loop comment');
+  assert.equal(lines[3], '40 LET a(1)=1: REM Set array');
+  assert.equal(lines[4], '50 GO TO 40'); // @loop mapped to line 40
+});
+
+test('replaceLabelsOutsideStrings ignores @ characters inside REM comments', () => {
+  const source = `
+' Contact: dev@example.com
+@start:
+LET a=1
+REM Check @param and test@foo
+GO TO @start
+`;
+
+  const res = compileJBas(source, { start: 10, step: 10, keepComments: true });
+  assert.equal(res.success, true);
+  assert.equal(res.errors.length, 0);
+  const lines = res.text.trim().split(/\r?\n/);
+  assert.equal(lines[0], '10 REM Contact: dev@example.com');
+  assert.equal(lines[1], '20 LET a=1');
+  assert.equal(lines[2], '30 REM Check @param and test@foo');
+  assert.equal(lines[3], '40 GO TO 20');
+});
+
+test('transpileJBasAllVersions generates compact (1x1), step10 (10x10), and comments (10x10 + REM) versions', () => {
+  const source = `
+' Main header
+@start:
+BORDER 0: INK 7: PAPER 0: CLS ' Screen setup
+PRINT AT 10,10; "SCORE: "; score ' Show score
+LET a=1 : LET b=2 : LET c=3
+GO TO @start
+`;
+
+  const all = transpileJBasAllVersions(source);
+  assert.equal(all.success, true);
+
+  // Compact: 1 by 1, without comments (most optimal for TAP)
+  const compactLines = all.compact.text.trim().split(/\r?\n/);
+  assert.equal(compactLines[0], '1 BORDER 0: INK 7: PAPER 0: CLS');
+  assert.equal(compactLines[1], '2 PRINT AT 10,10; "SCORE: "; score');
+  assert.equal(compactLines[2], '3 LET a=1 : LET b=2 : LET c=3');
+  assert.equal(compactLines[3], '4 GO TO 1');
+
+  // Step 10: 10 by 10, without comments
+  const step10Lines = all.step10.text.trim().split(/\r?\n/);
+  assert.equal(step10Lines[0], '10 BORDER 0: INK 7: PAPER 0: CLS');
+  assert.equal(step10Lines[1], '20 PRINT AT 10,10; "SCORE: "; score');
+  assert.equal(step10Lines[2], '30 LET a=1 : LET b=2 : LET c=3');
+  assert.equal(step10Lines[3], '40 GO TO 10');
+
+  // Comments: 10 by 10, with comments
+  const commentsLines = all.comments.text.trim().split(/\r?\n/);
+  assert.equal(commentsLines[0], '10 REM Main header');
+  assert.equal(commentsLines[1], '20 BORDER 0: INK 7: PAPER 0: CLS: REM Screen setup');
+  assert.equal(commentsLines[2], '30 PRINT AT 10,10; "SCORE: "; score: REM Show score');
+  assert.equal(commentsLines[3], '40 LET a=1 : LET b=2 : LET c=3');
+  assert.equal(commentsLines[4], '50 GO TO 20');
 });
 

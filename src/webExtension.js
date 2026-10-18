@@ -5,7 +5,7 @@
 
 const vscode = require('vscode');
 const { renumberProgram } = require('./core/renumber');
-const { compileJBas } = require('./core/jbas2bas');
+const { compileJBas, transpileJBasAllVersions } = require('./core/jbas2bas');
 const { bas2tap, tap2buffer } = require('./core/tapGenerator');
 
 /**
@@ -86,19 +86,23 @@ async function buildTapFromDocument(doc) {
 
   if (doc.fileName.endsWith('.jbas')) {
     baseName = getBaseName(doc.uri, '.jbas');
-    const defaultStart = 1;
-    const defaultStep = 1;
-    const compileResult = compileJBas(basicCode, { start: defaultStart, step: defaultStep });
+    const all = transpileJBasAllVersions(basicCode);
 
-    if (!compileResult.success) {
-      throw new Error('Compilation failed:\n' + compileResult.errors.join('\n'));
+    if (!all.success) {
+      throw new Error('Compilation failed:\n' + all.errors.join('\n'));
     }
 
-    const targetBasUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
-    const encodedBas = new TextEncoder().encode(compileResult.text);
-    await vscode.workspace.fs.writeFile(targetBasUri, encodedBas);
+    const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
+    const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
+    const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
 
-    basicCode = compileResult.text;
+    const encoder = new TextEncoder();
+    await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
+    await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
+    await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+
+    // ALWAYS use the most optimal version (lines 1 by 1, without comments) for TAP generation
+    basicCode = all.compact.text;
   } else {
     baseName = getBaseName(doc.uri, '.bas');
   }
@@ -485,7 +489,7 @@ function activate(context) {
     }
   }
 
-  // Command: Transpile JBAS to numbered BAS
+  // Command: Transpile JBAS to 3 versions
   async function handleTranspileJBas(uri) {
     const doc = await getTargetDocument(uri);
     if (!doc || !doc.fileName.endsWith('.jbas')) {
@@ -494,13 +498,11 @@ function activate(context) {
     }
 
     const config = vscode.workspace.getConfiguration('sinclairBasic');
-    const start = config.get('renumberStart', 10);
-    const step = config.get('renumberStep', 10);
     const outDirName = config.get('outputDirectory', 'dist');
 
-    const result = compileJBas(doc.getText(), { start, step });
-    if (!result.success) {
-      vscode.window.showErrorMessage(`Compilation failed:\n${result.errors.join('\n')}`);
+    const all = transpileJBasAllVersions(doc.getText());
+    if (!all.success) {
+      vscode.window.showErrorMessage(`Compilation failed:\n${all.errors.join('\n')}`);
       return;
     }
 
@@ -508,14 +510,21 @@ function activate(context) {
     await vscode.workspace.fs.createDirectory(distUri);
 
     const baseName = getBaseName(doc.uri, '.jbas');
-    const targetBasUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
+    const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
+    const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
+    const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
 
-    await vscode.workspace.fs.writeFile(targetBasUri, new TextEncoder().encode(result.text));
+    const encoder = new TextEncoder();
+    await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
+    await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
+    await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
 
-    const openedDoc = await vscode.workspace.openTextDocument(targetBasUri);
+    const openedDoc = await vscode.workspace.openTextDocument(step10Uri);
     await vscode.window.showTextDocument(openedDoc);
 
-    vscode.window.showInformationMessage(`Transpiled ${baseName}.jbas (${result.linesCount} lines) → ${baseName}.bas`);
+    vscode.window.showInformationMessage(
+      `Transpiled 3 versions to dist/: ${baseName}.bas (1x1 optimal), ${baseName}-step10.bas (10x10), ${baseName}-comments.bas (10x10 + REM)`
+    );
   }
 
   // Command: Compile JBAS to TAP

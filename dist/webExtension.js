@@ -303,6 +303,33 @@ var require_jbas2bas = __commonJS({
       }
       return line;
     }
+    function convertCommentsToRem(line) {
+      let inString = false;
+      let i = 0;
+      const n = line.length;
+      while (i < n) {
+        const c = line[i];
+        if (c === '"') {
+          inString = !inString;
+          i++;
+          continue;
+        }
+        if (!inString && c === "'") {
+          const before = line.slice(0, i).trimEnd();
+          const commentText = line.slice(i + 1);
+          const remSpacing = commentText.startsWith(" ") || commentText.length === 0 ? "" : " ";
+          if (!before) {
+            return `REM${remSpacing}${commentText}`;
+          }
+          if (before.endsWith(":")) {
+            return `${before} REM${remSpacing}${commentText}`;
+          }
+          return `${before}: REM${remSpacing}${commentText}`;
+        }
+        i++;
+      }
+      return line;
+    }
     function replaceLabelsOutsideStrings(code, labelMap, errors, sourceLineIndex) {
       let result = "";
       let i = 0;
@@ -318,6 +345,14 @@ var require_jbas2bas = __commonJS({
           if (i < n) i++;
           result += code.slice(start, i);
           continue;
+        }
+        const isRem = code.slice(i, i + 3).toUpperCase() === "REM";
+        const prevChar = i > 0 ? code[i - 1] : " ";
+        const nextChar = i + 3 < n ? code[i + 3] : " ";
+        const isWordBoundary = !/[a-zA-Z0-9_]/.test(prevChar) && !/[a-zA-Z0-9_]/.test(nextChar);
+        if (isRem && isWordBoundary) {
+          result += code.slice(i);
+          break;
         }
         if (c === "@") {
           const match = code.slice(i).match(/^@([a-zA-Z0-9_]+)/);
@@ -341,6 +376,7 @@ var require_jbas2bas = __commonJS({
     function compileJBas2(sourceText, options = {}) {
       const start = typeof options.start === "number" ? options.start : 10;
       const step = typeof options.step === "number" ? options.step : 10;
+      const keepComments = !!options.keepComments;
       const rawLines = sourceText.split(/\r?\n/);
       const isCrlf = sourceText.includes("\r\n");
       const eol = isCrlf ? "\r\n" : "\n";
@@ -352,7 +388,7 @@ var require_jbas2bas = __commonJS({
       const seenLabels = /* @__PURE__ */ new Map();
       for (let idx = 0; idx < rawLines.length; idx++) {
         const origLineNum = idx + 1;
-        let line = stripComments(rawLines[idx]).trim();
+        let line = keepComments ? convertCommentsToRem(rawLines[idx]).trim() : stripComments(rawLines[idx]).trim();
         if (!line) {
           continue;
         }
@@ -368,6 +404,9 @@ var require_jbas2bas = __commonJS({
             }
             pendingLabels.push(labelName);
             line = labelMatch[2].trim();
+            if (line.startsWith(":")) {
+              line = line.slice(1).trim();
+            }
           } else {
             break;
           }
@@ -487,11 +526,27 @@ Options:
       const ok = compileJBasFile(inputFile, outputFile, { start, step });
       process.exit(ok ? 0 : 1);
     }
+    function transpileJBasAllVersions2(sourceText) {
+      const compact = compileJBas2(sourceText, { start: 1, step: 1, keepComments: false });
+      const step10 = compileJBas2(sourceText, { start: 10, step: 10, keepComments: false });
+      const comments = compileJBas2(sourceText, { start: 10, step: 10, keepComments: true });
+      const errors = [.../* @__PURE__ */ new Set([...compact.errors, ...step10.errors, ...comments.errors])];
+      const success = compact.success && step10.success && comments.success;
+      return {
+        compact,
+        step10,
+        comments,
+        success,
+        errors
+      };
+    }
     module2.exports = {
       stripComments,
+      convertCommentsToRem,
       replaceLabelsOutsideStrings,
       compileJBas: compileJBas2,
-      compileJBasFile
+      compileJBasFile,
+      transpileJBasAllVersions: transpileJBasAllVersions2
     };
     if (require.main === module2) {
       runCli();
@@ -847,7 +902,7 @@ var require_tapGenerator = __commonJS({
 // src/webExtension.js
 var vscode = require("vscode");
 var { renumberProgram } = require_renumber();
-var { compileJBas } = require_jbas2bas();
+var { compileJBas, transpileJBasAllVersions } = require_jbas2bas();
 var { bas2tap, tap2buffer } = require_tapGenerator();
 function getBaseName(uri, extToRemove = "") {
   const segments = uri.path.split("/");
@@ -892,16 +947,18 @@ async function buildTapFromDocument(doc) {
   let baseName = "";
   if (doc.fileName.endsWith(".jbas")) {
     baseName = getBaseName(doc.uri, ".jbas");
-    const defaultStart = 1;
-    const defaultStep = 1;
-    const compileResult = compileJBas(basicCode, { start: defaultStart, step: defaultStep });
-    if (!compileResult.success) {
-      throw new Error("Compilation failed:\n" + compileResult.errors.join("\n"));
+    const all = transpileJBasAllVersions(basicCode);
+    if (!all.success) {
+      throw new Error("Compilation failed:\n" + all.errors.join("\n"));
     }
-    const targetBasUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
-    const encodedBas = new TextEncoder().encode(compileResult.text);
-    await vscode.workspace.fs.writeFile(targetBasUri, encodedBas);
-    basicCode = compileResult.text;
+    const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
+    const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
+    const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
+    const encoder = new TextEncoder();
+    await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
+    await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
+    await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+    basicCode = all.compact.text;
   } else {
     baseName = getBaseName(doc.uri, ".bas");
   }
@@ -1263,23 +1320,28 @@ function activate(context) {
       return;
     }
     const config = vscode.workspace.getConfiguration("sinclairBasic");
-    const start = config.get("renumberStart", 10);
-    const step = config.get("renumberStep", 10);
     const outDirName = config.get("outputDirectory", "dist");
-    const result = compileJBas(doc.getText(), { start, step });
-    if (!result.success) {
+    const all = transpileJBasAllVersions(doc.getText());
+    if (!all.success) {
       vscode.window.showErrorMessage(`Compilation failed:
-${result.errors.join("\n")}`);
+${all.errors.join("\n")}`);
       return;
     }
     const distUri = getDistUri(doc.uri, outDirName);
     await vscode.workspace.fs.createDirectory(distUri);
     const baseName = getBaseName(doc.uri, ".jbas");
-    const targetBasUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
-    await vscode.workspace.fs.writeFile(targetBasUri, new TextEncoder().encode(result.text));
-    const openedDoc = await vscode.workspace.openTextDocument(targetBasUri);
+    const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
+    const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
+    const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
+    const encoder = new TextEncoder();
+    await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
+    await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
+    await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+    const openedDoc = await vscode.workspace.openTextDocument(step10Uri);
     await vscode.window.showTextDocument(openedDoc);
-    vscode.window.showInformationMessage(`Transpiled ${baseName}.jbas (${result.linesCount} lines) \u2192 ${baseName}.bas`);
+    vscode.window.showInformationMessage(
+      `Transpiled 3 versions to dist/: ${baseName}.bas (1x1 optimal), ${baseName}-step10.bas (10x10), ${baseName}-comments.bas (10x10 + REM)`
+    );
   }
   async function handleCompileJBas(uri) {
     const doc = await getTargetDocument(uri);

@@ -50,7 +50,43 @@ function stripComments(line) {
 }
 
 /**
+ * Converts single-quote comments ('...) to Sinclair BASIC REM comments.
+ * Respects string literals and handles both full-line and inline comments.
+ * @param {string} line 
+ * @returns {string}
+ */
+function convertCommentsToRem(line) {
+  let inString = false;
+  let i = 0;
+  const n = line.length;
+
+  while (i < n) {
+    const c = line[i];
+    if (c === '"') {
+      inString = !inString;
+      i++;
+      continue;
+    }
+    if (!inString && c === "'") {
+      const before = line.slice(0, i).trimEnd();
+      const commentText = line.slice(i + 1);
+      const remSpacing = (commentText.startsWith(' ') || commentText.length === 0) ? '' : ' ';
+      if (!before) {
+        return `REM${remSpacing}${commentText}`;
+      }
+      if (before.endsWith(':')) {
+        return `${before} REM${remSpacing}${commentText}`;
+      }
+      return `${before}: REM${remSpacing}${commentText}`;
+    }
+    i++;
+  }
+  return line;
+}
+
+/**
  * Replaces @label occurrences outside string literals with their resolved line numbers.
+ * Safely preserves REM comments without treating @ mentions inside comments as labels.
  * @param {string} code 
  * @param {Map<string, number>} labelMap 
  * @param {string[]} errors 
@@ -77,6 +113,17 @@ function replaceLabelsOutsideStrings(code, labelMap, errors, sourceLineIndex) {
       continue;
     }
 
+    // Check for REM keyword outside strings - preserve rest of line as-is
+    const isRem = code.slice(i, i + 3).toUpperCase() === 'REM';
+    const prevChar = i > 0 ? code[i - 1] : ' ';
+    const nextChar = i + 3 < n ? code[i + 3] : ' ';
+    const isWordBoundary = !/[a-zA-Z0-9_]/.test(prevChar) && !/[a-zA-Z0-9_]/.test(nextChar);
+
+    if (isRem && isWordBoundary) {
+      result += code.slice(i);
+      break;
+    }
+
     // Check for @label reference
     if (c === '@') {
       const match = code.slice(i).match(/^@([a-zA-Z0-9_]+)/);
@@ -100,6 +147,7 @@ function replaceLabelsOutsideStrings(code, labelMap, errors, sourceLineIndex) {
   return result;
 }
 
+
 /**
  * Compiles a .jbas string into a numbered Sinclair .bas string.
  * 
@@ -107,6 +155,7 @@ function replaceLabelsOutsideStrings(code, labelMap, errors, sourceLineIndex) {
  * @param {Object} [options]
  * @param {number} [options.start=10]
  * @param {number} [options.step=10]
+ * @param {boolean} [options.keepComments=false]
  * @returns {{
  *   success: boolean,
  *   text: string,
@@ -119,6 +168,7 @@ function replaceLabelsOutsideStrings(code, labelMap, errors, sourceLineIndex) {
 function compileJBas(sourceText, options = {}) {
   const start = typeof options.start === 'number' ? options.start : 10;
   const step = typeof options.step === 'number' ? options.step : 10;
+  const keepComments = !!options.keepComments;
 
   const rawLines = sourceText.split(/\r?\n/);
   const isCrlf = sourceText.includes('\r\n');
@@ -128,17 +178,19 @@ function compileJBas(sourceText, options = {}) {
   const warnings = [];
   const labelMap = new Map();
 
-  // PASS 1: Strip comments, collect labels, identify statements
+  // PASS 1: Strip or convert comments, collect labels, identify statements
   const statements = [];
   let pendingLabels = [];
   const seenLabels = new Map(); // labelName -> origLineNum
 
   for (let idx = 0; idx < rawLines.length; idx++) {
     const origLineNum = idx + 1;
-    let line = stripComments(rawLines[idx]).trim();
+    let line = keepComments
+      ? convertCommentsToRem(rawLines[idx]).trim()
+      : stripComments(rawLines[idx]).trim();
 
     if (!line) {
-      // Empty line (or comment-only line) -> skip
+      // Empty line (or comment-only line when comments are stripped) -> skip
       continue;
     }
 
@@ -155,6 +207,9 @@ function compileJBas(sourceText, options = {}) {
         }
         pendingLabels.push(labelName);
         line = labelMatch[2].trim();
+        if (line.startsWith(':')) {
+          line = line.slice(1).trim();
+        }
       } else {
         break;
       }
@@ -310,13 +365,48 @@ Options:
   process.exit(ok ? 0 : 1);
 }
 
+/**
+ * Transpiles .jbas source into 3 standard Sinclair BASIC versions:
+ * 1) compact: lines 1 by 1, without comments (<name>.bas - most optimal for TAP)
+ * 2) step10: lines 10 by 10, without comments (<name>-step10.bas)
+ * 3) comments: lines 10 by 10, with comments (<name>-comments.bas)
+ * 
+ * @param {string} sourceText 
+ * @returns {{
+ *   compact: ReturnType<typeof compileJBas>,
+ *   step10: ReturnType<typeof compileJBas>,
+ *   comments: ReturnType<typeof compileJBas>,
+ *   success: boolean,
+ *   errors: string[]
+ * }}
+ */
+function transpileJBasAllVersions(sourceText) {
+  const compact = compileJBas(sourceText, { start: 1, step: 1, keepComments: false });
+  const step10 = compileJBas(sourceText, { start: 10, step: 10, keepComments: false });
+  const comments = compileJBas(sourceText, { start: 10, step: 10, keepComments: true });
+
+  const errors = [...new Set([...compact.errors, ...step10.errors, ...comments.errors])];
+  const success = compact.success && step10.success && comments.success;
+
+  return {
+    compact,
+    step10,
+    comments,
+    success,
+    errors
+  };
+}
+
 module.exports = {
   stripComments,
+  convertCommentsToRem,
   replaceLabelsOutsideStrings,
   compileJBas,
-  compileJBasFile
+  compileJBasFile,
+  transpileJBasAllVersions
 };
 
 if (require.main === module) {
   runCli();
 }
+

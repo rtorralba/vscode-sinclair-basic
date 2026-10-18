@@ -84,7 +84,7 @@ vscode-sinclair-basic/
 
 2. **jbas Transpiler (`src/core/jbas2bas.js`)**:
    - 2-pass compiler:
-     - Pass 1: Strips `'` comments, ignores blank lines, collects `@label:` targets, assigns sequential numbers.
+     - Pass 1: Strips `'` comments or converts to `: REM`, ignores blank lines, collects `@label:` targets, assigns sequential numbers.
      - Pass 2: Substitutes `@label` references outside strings with mapped line numbers.
    - Detects and reports undefined labels and duplicate definitions.
 
@@ -100,18 +100,22 @@ vscode-sinclair-basic/
    - Explicit attribution footer in the Webview: `Emulado con Turbo80 — Emulador de ZX Spectrum por José Enrique García (Incinerator)`.
    - Allows falling back to external desktop emulators (Fuse, etc.) if configured.
 
-5. **VS Code Extension Integration (`src/extension.js`)**:
-   - `sinclairBasic.compileJBas`: Compiles `.jbas` to compact intermediate `dist/<filename>.bas` (numbered 1 by 1) and builds `dist/<filename>.tap` natively (`Ctrl+Shift+B`).
-   - `sinclairBasic.transpileJBas`: Transpiles `.jbas` to `dist/<filename>.bas` (numbered 10 by 10) and opens it in editor. Does not generate `.tap` (`Ctrl+Shift+T`).
-   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compiles `.bas` to `dist/<filename>.tap` natively (`Ctrl+Shift+B`).
-   - `sinclairBasic.renumber` / `sinclairBasic.renumberBas`: Renumbers lines directly in active editor with jump updates and undo/redo support (`Ctrl+Alt+R`).
-   - `sinclairBasic.runEmulator`: Builds TAP and launches Turbo80 Webview (or external Fuse) (`Ctrl+F5`).
-   - `sinclairBasic.runTurbo80`: Explicitly launches Turbo80 Webview.
-   - `sinclairBasic.runExternalEmulator`: Explicitly launches external desktop emulator.
-   - Full integration with Editor Toolbar (`editor/title`), Editor Context menu (`editor/context`), Explorer File menu (`explorer/context`), and Command Palette.
+5. **VS Code Extension Integration (`src/extension.js` & `src/webExtension.js`)**:
+   - `sinclairBasic.compileJBas`: Transpila `.jbas` generando las 3 versiones en `dist/` y compila **exclusivamente la versión óptima (1 en 1 sin comentarios: `dist/<filename>.bas`)** en `dist/<filename>.tap` (`Ctrl+Shift+B`).
+   - `sinclairBasic.transpileJBas`: Transpila `.jbas` generando las 3 versiones en `dist/`:
+     1. `dist/<filename>.bas`: Líneas 1 a 1, sin comentarios (máxima optimización para cinta y RAM del Spectrum).
+     2. `dist/<filename>-step10.bas`: Líneas de 10 en 10, sin comentarios (versión estándar para desarrollo y lectura).
+     3. `dist/<filename>-comments.bas`: Líneas de 10 en 10, con comentarios convertidos a `REM` (versión documentada).
+     Abre `dist/<filename>-step10.bas` en el editor sin generar TAP (`Ctrl+Shift+T`).
+   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compila `.bas` a `dist/<filename>.tap` nativamente (`Ctrl+Shift+B`).
+   - `sinclairBasic.renumber` / `sinclairBasic.renumberBas`: Renumbra líneas directamente en el editor activo con actualización de saltos y soporte de undo/redo (`Ctrl+Alt+R`).
+   - `sinclairBasic.runEmulator`: Construye el TAP óptimo y lanza el emulador Turbo80 con foco automático (`Ctrl+F5`).
+   - `sinclairBasic.runTurbo80`: Lanza explícitamente el Webview de Turbo80 con foco automático.
+   - `sinclairBasic.runExternalEmulator`: Lanza explícitamente el emulador de escritorio configurado (ej. Fuse).
+   - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node --test test/*.test.js`). 20 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 25 passing tests.
 
 ---
 
@@ -122,7 +126,7 @@ When you open this project in VS Code, here is what is ready to be done:
 1. **Manual F5 Smoke Test in Extension Development Host**:
    - Press `F5` in VS Code to launch the Extension Development Host.
    - Open a `.bas` file -> verify highlighting and run `Sinclair BASIC: Renumber Lines`.
-   - Open a `.jbas` file -> verify highlighting, run `Sinclair BASIC: Compile .jbas`, `Build TAP`, and `Run in Emulator`.
+   - Open a `.jbas` file -> verify highlighting, run `Sinclair BASIC: Transpile .jbas to .bas` (genera las 3 versiones en `dist/`), `Build TAP`, and `Run in Emulator`.
 2. **TypeScript / Type Declarations**:
    - Currently written in modern Node.js CommonJS for zero-build speed.
    - You can add `npm install --save-dev @types/vscode` if you want VS Code API autocomplete in `src/extension.js`.
@@ -143,3 +147,6 @@ When you open this project in VS Code, here is what is ready to be done:
    - Never alter text inside `"double quotes"` or after `REM` comments.
 3. **Keep core pure**:
    - `src/core/renumber.js` and `src/core/jbas2bas.js` must remain pure JavaScript without VS Code API dependencies so they can be run in CLI, web, or automated test runners.
+4. **MUY IMPORTANTE: Generación de TAP siempre con la versión más óptima**:
+   - Para compilar a imagen de cinta `.tap`, se DEBE usar SIEMPRE la versión más óptima: **líneas de 1 en 1 y sin comentarios** (`dist/<filename>.bas`).
+   - Esto minimiza drásticamente los bytes en la cinta, reduce el consumo de memoria RAM en el ZX Spectrum y agiliza la velocidad de ejecución del intérprete de Sinclair BASIC al evitar saltar sobre o procesar líneas de comentarios `REM`.

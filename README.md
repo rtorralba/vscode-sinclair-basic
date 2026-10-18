@@ -58,8 +58,8 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shif
 
 | Command | Identifier | Shortcut | Description |
 |---|---|---|---|
-| **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Numbers lines 1 by 1, builds `.tap` without opening the intermediate `.bas`. |
-| **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Numbers lines 10 by 10, saves `.bas` and opens it in editor. Does not generate `.tap`. |
+| **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Generates 3 `.bas` versions in `dist/` and builds `.tap` strictly from the optimal 1x1 no-comments version (`<name>.bas`). |
+| **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Generates 3 versions in `dist/` (`<name>.bas` 1x1, `<name>-step10.bas` 10x10, `<name>-comments.bas` 10x10+REM) and opens `step10` in editor. |
 | **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` to a ZX Spectrum `.tap` tape image using native pure JS engine. |
 | **Renumber BAS Lines (.bas)** | `sinclairBasic.renumber` / `renumberBas` | `Ctrl+Alt+R` | Renumbers lines in `.bas` (10 by 10) and updates all jump references (`GOTO`, `GOSUB`, `RESTORE`, etc.). |
 | **Run in Emulator** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured emulator (built-in Turbo80 Webview or external Fuse). |
