@@ -243,6 +243,49 @@ function getTurbo80Html() {
     let emulator = null;
     let pendingData = null;
 
+    function focusEmulator() {
+      try {
+        if (emulator && typeof emulator.focus === 'function') {
+          emulator.focus();
+        }
+      } catch (e) {}
+      try {
+        const iframe = document.querySelector('#spectrum iframe') || (emulator && emulator.iframe);
+        if (iframe) {
+          if (!iframe.hasAttribute('tabindex')) {
+            iframe.setAttribute('tabindex', '0');
+          }
+          iframe.focus();
+          if (iframe.contentWindow) {
+            iframe.contentWindow.focus();
+          }
+          if (typeof iframe.click === 'function') {
+            iframe.click();
+          }
+        }
+      } catch (e) {}
+    }
+
+    function attachIframeListeners() {
+      try {
+        const iframe = document.querySelector('#spectrum iframe') || (emulator && emulator.iframe);
+        if (iframe && !iframe._hasLoadedListener) {
+          iframe._hasLoadedListener = true;
+          iframe.addEventListener('load', () => {
+            scheduleFocus();
+          });
+        }
+      } catch (e) {}
+    }
+
+    function scheduleFocus() {
+      focusEmulator();
+      attachIframeListeners();
+      [50, 150, 300, 500, 800, 1200, 1800].forEach(delay => {
+        setTimeout(focusEmulator, delay);
+      });
+    }
+
     function applyTap(data) {
       try {
         const binaryString = atob(data.base64);
@@ -267,6 +310,11 @@ function getTurbo80Html() {
             crt: data.crt ? 'on' : 'off',
             iframe: true
           });
+          if (emulator && typeof emulator.on === 'function') {
+            emulator.on('ready', scheduleFocus);
+            emulator.on('loaded', scheduleFocus);
+          }
+          attachIframeListeners();
         } else {
           const doLoad = () => emulator.load(bytes, data.filename || 'game.tap');
           if (emulator.setModel) {
@@ -275,11 +323,17 @@ function getTurbo80Html() {
                 if (emulator.reset) emulator.reset();
                 return doLoad();
               })
-              .catch(doLoad);
+              .then(() => { scheduleFocus(); })
+              .catch(() => {
+                doLoad();
+                scheduleFocus();
+              });
           } else {
             doLoad();
+            scheduleFocus();
           }
         }
+        scheduleFocus();
       } catch (err) {
         console.error('Error loading TAP into Turbo80:', err);
         document.getElementById('game-title').textContent = 'Error al cargar TAP: ' + err.message;
@@ -303,6 +357,16 @@ function getTurbo80Html() {
         pendingData = null;
       }
       vscode.postMessage({ command: 'ready' });
+    });
+
+    window.addEventListener('focus', focusEmulator);
+    window.addEventListener('pointerdown', focusEmulator);
+    window.addEventListener('click', focusEmulator);
+    window.addEventListener('keydown', focusEmulator);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        scheduleFocus();
+      }
     });
   </script>
 </body>
@@ -331,14 +395,17 @@ function activate(context) {
     };
 
     if (currentTurbo80Panel) {
-      currentTurbo80Panel.reveal(vscode.ViewColumn.Beside);
+      currentTurbo80Panel.reveal(vscode.ViewColumn.Beside, false);
       currentTurbo80Panel.title = `ZX: ${filename}`;
       currentTurbo80Panel.webview.postMessage(payload);
     } else {
       currentTurbo80Panel = vscode.window.createWebviewPanel(
         'sinclairBasicTurbo80',
         `ZX: ${filename}`,
-        vscode.ViewColumn.Beside,
+        {
+          viewColumn: vscode.ViewColumn.Beside,
+          preserveFocus: false
+        },
         {
           enableScripts: true,
           retainContextWhenHidden: true
