@@ -84,46 +84,7 @@ async function buildTapFromBas(basPath, distDir) {
   return { tapPath: result.tapPath, autoStartLine: result.autoStartLine };
 }
 
-/**
- * Prepares the .bas file for TAP compilation.
- * If the document is a .jbas file, it is compiled to .bas first.
- * @param {vscode.TextDocument} doc
- * @returns {Promise<string>} Path to .bas file
- */
-async function prepareBasFile(doc) {
-  const filePath = doc.fileName;
-  const config = vscode.workspace.getConfiguration('sinclairBasic');
-  const outDirName = config.get('outputDirectory', 'dist');
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
-  const rootDir = workspaceFolder ? workspaceFolder.uri.fsPath : path.dirname(filePath);
-  const distDir = path.isAbsolute(outDirName) ? outDirName : path.join(rootDir, outDirName);
 
-  if (!fs.existsSync(distDir)) {
-    fs.mkdirSync(distDir, { recursive: true });
-  }
-
-  if (filePath.endsWith('.jbas')) {
-    const all = transpileJBasAllVersions(doc.getText());
-
-    if (!all.success) {
-      throw new Error('Compilation failed:\n' + all.errors.join('\n'));
-    }
-
-    const baseName = path.basename(filePath, '.jbas');
-    const compactPath = path.join(distDir, `${baseName}.bas`);
-    const step10Path = path.join(distDir, `${baseName}-step10.bas`);
-    const commentsPath = path.join(distDir, `${baseName}-comments.bas`);
-
-    fs.writeFileSync(compactPath, all.compact.text, 'utf-8');
-    fs.writeFileSync(step10Path, all.step10.text, 'utf-8');
-    fs.writeFileSync(commentsPath, all.comments.text, 'utf-8');
-
-    // Return the compact version (1 by 1 without comments) as the optimal source for TAP
-    return compactPath;
-  }
-
-  return filePath;
-}
 
 /**
  * @param {vscode.ExtensionContext} context
