@@ -140,6 +140,20 @@ function tokenizeLine(line) {
       if (i < line.length) {
         res.push(line.charCodeAt(i));
         i++;
+        while (i < line.length && line[i] === ' ') {
+          i++;
+        }
+      }
+      continue;
+    }
+
+    // Colon statement separator: consume trailing whitespace (matching standard Sinclair BASIC and bas2tap)
+    if (line[i] === ':') {
+      afterBin = false;
+      res.push(0x3A);
+      i++;
+      while (i < line.length && line[i] === ' ') {
+        i++;
       }
       continue;
     }
@@ -185,9 +199,12 @@ function tokenizeLine(line) {
         const token = KEYWORDS[k];
         res.push(token);
 
-        // If REM keyword, the rest of the line is a comment (raw ASCII)
+        // If REM keyword, skip trailing spaces after REM, then copy rest of line as raw ASCII
         if (token === 0xEA) {
           i += k.length;
+          while (i < line.length && line[i] === ' ') {
+            i++;
+          }
           while (i < line.length) {
             res.push(line.charCodeAt(i));
             i++;
@@ -198,6 +215,12 @@ function tokenizeLine(line) {
 
         afterBin = (token === 0xC4);
         i += k.length;
+        // In the ZX Spectrum ROM, keywords automatically include trailing spaces when
+        // listed or printed. Therefore, trailing spaces following keywords in the source text
+        // must be consumed so that duplicate spaces are not introduced (e.g. LET py=0, CHR$ 18).
+        while (i < line.length && line[i] === ' ') {
+          i++;
+        }
         found = true;
         break;
       }

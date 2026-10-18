@@ -91,6 +91,7 @@ vscode-sinclair-basic/
 3. **Pure JavaScript TAP Generator (`src/core/tapGenerator.js`)**:
    - Native Sinclair BASIC tokenizer and ZX Spectrum `.tap` generator written in pure JS.
    - Encodes Sinclair BASIC token bytes (0x80-0xFF), ZX Spectrum floating-point numbers, UDGs, and line lengths.
+   - Exact whitespace parity with `bas2tap`: Automatically consumes trailing spaces after keywords/tokens, `:` statement separators, and `REM` to prevent double spaces when listed on the ZX Spectrum ROM (e.g. `LET py=0` and `CHR$ 18`).
    - Zero external binary requirements (no `bas2tap.exe` needed by default).
 
 4. **Integrated Web Emulator: Turbo80 (`src/extension.js`)**:

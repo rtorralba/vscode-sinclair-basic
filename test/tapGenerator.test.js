@@ -28,14 +28,34 @@ test('tokenizeLine is case-insensitive for keywords', () => {
   assert.ok(tokens.includes(KEYWORDS['GOTO']));
 });
 
-test('tokenizeLine does not tokenize keywords or numbers inside REM comments', () => {
+test('tokenizeLine does not tokenize keywords or numbers inside REM comments and trims leading keyword space', () => {
   const line = 'REM PRINT GOTO 999';
   const tokens = tokenizeLine(line);
 
   assert.equal(tokens[0], KEYWORDS['REM']);
-  // Following bytes should be raw ASCII for ' PRINT GOTO 999\r'
+  // Following bytes should be raw ASCII for 'PRINT GOTO 999' without duplicate space
   const restChars = tokens.slice(1, -1).map(c => String.fromCharCode(c)).join('');
-  assert.equal(restChars, ' PRINT GOTO 999');
+  assert.equal(restChars, 'PRINT GOTO 999');
+});
+
+test('tokenizeLine consumes whitespace after keywords preventing duplicate spaces on LIST (e.g. LET py=0, CHR$ 18)', () => {
+  // Test LET py=0
+  const tokensLet = tokenizeLine('LET py=0');
+  assert.equal(tokensLet[0], KEYWORDS['LET']);
+  assert.equal(String.fromCharCode(tokensLet[1]), 'p', 'First char after LET token must be variable name "p", not space');
+  assert.equal(String.fromCharCode(tokensLet[2]), 'y');
+
+  // Test CHR$ 18
+  const tokensChr = tokenizeLine('CHR$ 18');
+  assert.equal(tokensChr[0], KEYWORDS['CHR$']);
+  assert.equal(String.fromCharCode(tokensChr[1]), '1', 'First char after CHR$ token must be digit "1", not space');
+  assert.equal(String.fromCharCode(tokensChr[2]), '8');
+
+  // Test statement separator colon :
+  const tokensColon = tokenizeLine('LET a=1: LET b=2');
+  const colonIndex = tokensColon.indexOf(0x3A);
+  assert.ok(colonIndex > 0, 'Must have colon token');
+  assert.equal(tokensColon[colonIndex + 1], KEYWORDS['LET'], 'Token immediately following colon must be LET, not space');
 });
 
 test('bas2tap generates valid TAP header and data blocks with correct checksums', () => {

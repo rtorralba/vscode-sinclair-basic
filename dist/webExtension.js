@@ -744,6 +744,18 @@ var require_tapGenerator = __commonJS({
           if (i < line.length) {
             res.push(line.charCodeAt(i));
             i++;
+            while (i < line.length && line[i] === " ") {
+              i++;
+            }
+          }
+          continue;
+        }
+        if (line[i] === ":") {
+          afterBin = false;
+          res.push(58);
+          i++;
+          while (i < line.length && line[i] === " ") {
+            i++;
           }
           continue;
         }
@@ -782,6 +794,9 @@ var require_tapGenerator = __commonJS({
             res.push(token);
             if (token === 234) {
               i += k.length;
+              while (i < line.length && line[i] === " ") {
+                i++;
+              }
               while (i < line.length) {
                 res.push(line.charCodeAt(i));
                 i++;
@@ -791,6 +806,9 @@ var require_tapGenerator = __commonJS({
             }
             afterBin = token === 196;
             i += k.length;
+            while (i < line.length && line[i] === " ") {
+              i++;
+            }
             found = true;
             break;
           }
