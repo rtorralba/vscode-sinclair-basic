@@ -87,6 +87,7 @@ vscode-sinclair-basic/
      - Pass 1: Strips `'` comments or converts to `: REM`, ignores blank lines, collects `@label:` targets, assigns sequential numbers.
      - Pass 2: Substitutes `@label` references outside strings with mapped line numbers.
    - Detects and reports undefined labels and duplicate definitions.
+   - Smart whitespace compaction (`compactWhitespaceOutsideStrings`): For the compact optimal build (`dist/<filename>.bas`), strips redundant spaces around operators (`=`, `+`, `-`, `*`, `/`, `^`, `<`, `>`, `<=`, `>=`, `<>`, `(`, `)`, `,`, `;`, `:`), preserving spaces inside string literals and `REM` comments while keeping `step10` readable.
 
 3. **Pure JavaScript TAP Generator (`src/core/tapGenerator.js`)**:
    - Native Sinclair BASIC tokenizer and ZX Spectrum `.tap` generator written in pure JS.
@@ -102,9 +103,9 @@ vscode-sinclair-basic/
    - Allows falling back to external desktop emulators (Fuse, etc.) if configured.
 
 5. **VS Code Extension Integration (`src/extension.js` & `src/webExtension.js`)**:
-   - `sinclairBasic.compileJBas`: Transpila `.jbas` generando las 3 versiones en `dist/` y compila **exclusivamente la versión óptima (1 en 1 sin comentarios: `dist/<filename>.bas`)** en `dist/<filename>.tap` (`Ctrl+Shift+B`).
+   - `sinclairBasic.compileJBas`: Transpila `.jbas` generando las 3 versiones en `dist/` y compila **exclusivamente la versión óptima (1 en 1 sin comentarios y compactada: `dist/<filename>.bas`)** en `dist/<filename>.tap` (`Ctrl+Shift+B`).
    - `sinclairBasic.transpileJBas`: Transpila `.jbas` generando las 3 versiones en `dist/`:
-     1. `dist/<filename>.bas`: Líneas 1 a 1, sin comentarios (máxima optimización para cinta y RAM del Spectrum).
+     1. `dist/<filename>.bas`: Líneas 1 a 1, sin comentarios y con espacios de operadores compactados (máxima optimización para cinta y RAM del Spectrum).
      2. `dist/<filename>-step10.bas`: Líneas de 10 en 10, sin comentarios (versión estándar para desarrollo y lectura).
      3. `dist/<filename>-comments.bas`: Líneas de 10 en 10, con comentarios convertidos a `REM` (versión documentada).
      Abre `dist/<filename>-step10.bas` en el editor sin generar TAP (`Ctrl+Shift+T`).
@@ -116,7 +117,7 @@ vscode-sinclair-basic/
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 25 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 26 passing tests.
 
 ---
 
@@ -149,5 +150,5 @@ When you open this project in VS Code, here is what is ready to be done:
 3. **Keep core pure**:
    - `src/core/renumber.js` and `src/core/jbas2bas.js` must remain pure JavaScript without VS Code API dependencies so they can be run in CLI, web, or automated test runners.
 4. **MUY IMPORTANTE: Generación de TAP siempre con la versión más óptima**:
-   - Para compilar a imagen de cinta `.tap`, se DEBE usar SIEMPRE la versión más óptima: **líneas de 1 en 1 y sin comentarios** (`dist/<filename>.bas`).
+   - Para compilar a imagen de cinta `.tap`, se DEBE usar SIEMPRE la versión más óptima: **líneas de 1 en 1, sin comentarios y con compactación de espacios en operadores** (`dist/<filename>.bas`).
    - Esto minimiza drásticamente los bytes en la cinta, reduce el consumo de memoria RAM en el ZX Spectrum y agiliza la velocidad de ejecución del intérprete de Sinclair BASIC al evitar saltar sobre o procesar líneas de comentarios `REM`.

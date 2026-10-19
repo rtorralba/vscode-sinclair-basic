@@ -31,6 +31,7 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
   * **Automatic Indentation**: Writing `@label:` and pressing `Enter` automatically indents the code block inwards.
   * **Duplicate Label Detection**: Flags duplicate label definitions with real-time error diagnostics in the editor and halts compilation with line details.
   * Single-quote inline comments: `' this is a comment` (preserving single quotes inside string literals like `PRINT "DON'T"`).
+  * **Optimized Whitespace Compaction**: Automatically strips redundant whitespace around operators (`=`, `+`, `-`, `*`, `/`, `^`, `<`, `>`, `<=`, `>=`, `<>`, `(`, `)`, `,`, `;`, `:`) in the compact version (`dist/<name>.bas`) to minimize RAM consumption and TAP file size, while preserving readable spacing in `dist/<name>-step10.bas`.
   * Transpiles to clean, standard numbered `.bas` or compiles directly to `.tap`.
 
 ### 2. Intelligent Line Renumbering (`.bas`)

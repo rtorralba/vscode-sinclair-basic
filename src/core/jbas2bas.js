@@ -149,6 +149,80 @@ function replaceLabelsOutsideStrings(code, labelMap, errors, sourceLineIndex) {
 
 
 /**
+ * Compacts unnecessary whitespace around operators (=, +, -, *, /, ^, <, >, <=, >=, <>, :, ;, ,, (, ))
+ * outside string literals and REM comments. Preserves string literals and REM comments exactly as-is.
+ * 
+ * @param {string} code 
+ * @returns {string}
+ */
+function compactWhitespaceOutsideStrings(code) {
+  let result = '';
+  let inString = false;
+  let i = 0;
+  const n = code.length;
+
+  while (i < n) {
+    // Preserve string literals exactly as-is
+    if (code[i] === '"') {
+      const start = i;
+      i++;
+      while (i < n && code[i] !== '"') {
+        i++;
+      }
+      if (i < n) i++;
+      result += code.slice(start, i);
+      continue;
+    }
+
+    // Preserve REM comments to end of line as-is
+    const sub = code.slice(i);
+    const isRem = sub.toUpperCase().startsWith('REM');
+    const prevChar = i > 0 ? code[i - 1] : ' ';
+    const nextChar = i + 3 < n ? code[i + 3] : ' ';
+    if (isRem && !/[a-zA-Z0-9_]/.test(prevChar) && !/[a-zA-Z0-9_]/.test(nextChar)) {
+      result += code.slice(i);
+      break;
+    }
+
+    // Collect non-string segment
+    const segStart = i;
+    while (i < n && code[i] !== '"') {
+      const sub2 = code.slice(i);
+      if (sub2.toUpperCase().startsWith('REM')) {
+        const p = i > 0 ? code[i - 1] : ' ';
+        const nx = i + 3 < n ? code[i + 3] : ' ';
+        if (!/[a-zA-Z0-9_]/.test(p) && !/[a-zA-Z0-9_]/.test(nx)) {
+          break;
+        }
+      }
+      i++;
+    }
+
+    let seg = code.slice(segStart, i);
+    // Compact spaces around relational operators, punctuation, parentheses and multipliers
+    seg = seg.replace(/ *(<=|>=|<>|<|>|=|\*|\/|\^|:|;|,|\(|\)) */g, '$1');
+    // Compact spaces around + and - without merging consecutive signs (e.g. + + or - -)
+    seg = seg.replace(/(?<=[^+]) *\+ *(?=[^+])/g, '+');
+    seg = seg.replace(/(?<=[^-]) *- *(?=[^-])/g, '-');
+    // Collapse any remaining multiple consecutive spaces
+    seg = seg.replace(/ {2,}/g, ' ');
+
+    // If segment ends with an operator, strip trailing spaces before string literal
+    if (/[=+\-*\/^<>(),;:]\s*$/.test(seg)) {
+      seg = seg.replace(/\s+$/, '');
+    }
+    // If segment starts with an operator and previous was a string literal, strip leading spaces
+    if (/^\s*[=+\-*\/^<>(),;:]/.test(seg) && result.endsWith('"')) {
+      seg = seg.replace(/^\s+/, '');
+    }
+
+    result += seg;
+  }
+
+  return result.trim();
+}
+
+/**
  * Compiles a .jbas string into a numbered Sinclair .bas string.
  * 
  * @param {string} sourceText 
@@ -156,6 +230,7 @@ function replaceLabelsOutsideStrings(code, labelMap, errors, sourceLineIndex) {
  * @param {number} [options.start=10]
  * @param {number} [options.step=10]
  * @param {boolean} [options.keepComments=false]
+ * @param {boolean} [options.compactWhitespace=false]
  * @returns {{
  *   success: boolean,
  *   text: string,
@@ -169,6 +244,7 @@ function compileJBas(sourceText, options = {}) {
   const start = typeof options.start === 'number' ? options.start : 10;
   const step = typeof options.step === 'number' ? options.step : 10;
   const keepComments = !!options.keepComments;
+  const compactWhitespace = !!options.compactWhitespace;
 
   const rawLines = sourceText.split(/\r?\n/);
   const isCrlf = sourceText.includes('\r\n');
@@ -258,7 +334,10 @@ function compileJBas(sourceText, options = {}) {
   // PASS 2: Replace label references with line numbers
   const outputLines = [];
   for (const stmt of statements) {
-    const resolvedCode = replaceLabelsOutsideStrings(stmt.code, labelMap, errors, stmt.origLineNum);
+    let resolvedCode = replaceLabelsOutsideStrings(stmt.code, labelMap, errors, stmt.origLineNum);
+    if (compactWhitespace) {
+      resolvedCode = compactWhitespaceOutsideStrings(resolvedCode);
+    }
     outputLines.push(`${stmt.lineNum} ${resolvedCode}`);
   }
 
@@ -381,9 +460,9 @@ Options:
  * }}
  */
 function transpileJBasAllVersions(sourceText) {
-  const compact = compileJBas(sourceText, { start: 1, step: 1, keepComments: false });
-  const step10 = compileJBas(sourceText, { start: 10, step: 10, keepComments: false });
-  const comments = compileJBas(sourceText, { start: 10, step: 10, keepComments: true });
+  const compact = compileJBas(sourceText, { start: 1, step: 1, keepComments: false, compactWhitespace: true });
+  const step10 = compileJBas(sourceText, { start: 10, step: 10, keepComments: false, compactWhitespace: false });
+  const comments = compileJBas(sourceText, { start: 10, step: 10, keepComments: true, compactWhitespace: false });
 
   const errors = [...new Set([...compact.errors, ...step10.errors, ...comments.errors])];
   const success = compact.success && step10.success && comments.success;
@@ -401,6 +480,7 @@ module.exports = {
   stripComments,
   convertCommentsToRem,
   replaceLabelsOutsideStrings,
+  compactWhitespaceOutsideStrings,
   compileJBas,
   compileJBasFile,
   transpileJBasAllVersions

@@ -150,14 +150,14 @@ GO TO @start
   const all = transpileJBasAllVersions(source);
   assert.equal(all.success, true);
 
-  // Compact: 1 by 1, without comments (most optimal for TAP)
+  // Compact: 1 by 1, without comments and with compacted operator whitespace (most optimal for TAP)
   const compactLines = all.compact.text.trim().split(/\r?\n/);
-  assert.equal(compactLines[0], '1 BORDER 0: INK 7: PAPER 0: CLS');
-  assert.equal(compactLines[1], '2 PRINT AT 10,10; "SCORE: "; score');
-  assert.equal(compactLines[2], '3 LET a=1 : LET b=2 : LET c=3');
+  assert.equal(compactLines[0], '1 BORDER 0:INK 7:PAPER 0:CLS');
+  assert.equal(compactLines[1], '2 PRINT AT 10,10;"SCORE: ";score');
+  assert.equal(compactLines[2], '3 LET a=1:LET b=2:LET c=3');
   assert.equal(compactLines[3], '4 GO TO 1');
 
-  // Step 10: 10 by 10, without comments
+  // Step 10: 10 by 10, without comments (preserves original spacing for readability)
   const step10Lines = all.step10.text.trim().split(/\r?\n/);
   assert.equal(step10Lines[0], '10 BORDER 0: INK 7: PAPER 0: CLS');
   assert.equal(step10Lines[1], '20 PRINT AT 10,10; "SCORE: "; score');
@@ -171,5 +171,41 @@ GO TO @start
   assert.equal(commentsLines[2], '30 PRINT AT 10,10; "SCORE: "; score: REM Show score');
   assert.equal(commentsLines[3], '40 LET a=1 : LET b=2 : LET c=3');
   assert.equal(commentsLines[4], '50 GO TO 20');
+});
+
+test('compactWhitespaceOutsideStrings compacts spaces around operators while protecting strings and REM', () => {
+  const { compactWhitespaceOutsideStrings } = require('../src/core/jbas2bas.js');
+
+  // Arithmetic and string concatenation (+, -, *, /)
+  assert.equal(
+    compactWhitespaceOutsideStrings('LET c$ = CHR$ 17 + CHR$ 4 + " " + CHR$ 17 + CHR$ 1 + " "'),
+    'LET c$=CHR$ 17+CHR$ 4+" "+CHR$ 17+CHR$ 1+" "'
+  );
+  assert.equal(
+    compactWhitespaceOutsideStrings('LET p$  = CHR$ 17 + CHR$ 3 + CHR$ 16 + CHR$ 2 + CHR$ 18 + CHR$ 1 + " " + CHR$ 17 + CHR$ 1 + CHR$ 18 + CHR$ 0 + " "'),
+    'LET p$=CHR$ 17+CHR$ 3+CHR$ 16+CHR$ 2+CHR$ 18+CHR$ 1+" "+CHR$ 17+CHR$ 1+CHR$ 18+CHR$ 0+" "'
+  );
+
+  // Relational operators (<, >, <=, >=, <>, =)
+  assert.equal(
+    compactWhitespaceOutsideStrings('IF c1 < 0 THEN LET c1 = c2 + 31 + INT (RND * 6)'),
+    'IF c1<0 THEN LET c1=c2+31+INT(RND*6)'
+  );
+  assert.equal(
+    compactWhitespaceOutsideStrings('IF py <> oldpy THEN PRINT AT oldpy, 5; " "; AT py, 5; PAPER 2; " "'),
+    'IF py<>oldpy THEN PRINT AT oldpy,5;" ";AT py,5;PAPER 2;" "'
+  );
+
+  // Colons and semicolons
+  assert.equal(
+    compactWhitespaceOutsideStrings('LET py=0: LET oldpy=0: LET c1=0'),
+    'LET py=0:LET oldpy=0:LET c1=0'
+  );
+
+  // Preserves REM comments
+  assert.equal(
+    compactWhitespaceOutsideStrings('LET a = 1 + 2: REM Comment with spaces: 1 + 2 = 3'),
+    'LET a=1+2:REM Comment with spaces: 1 + 2 = 3'
+  );
 });
 

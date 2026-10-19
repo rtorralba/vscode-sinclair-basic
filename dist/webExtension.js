@@ -373,10 +373,62 @@ var require_jbas2bas = __commonJS({
       }
       return result;
     }
+    function compactWhitespaceOutsideStrings(code) {
+      let result = "";
+      let inString = false;
+      let i = 0;
+      const n = code.length;
+      while (i < n) {
+        if (code[i] === '"') {
+          const start = i;
+          i++;
+          while (i < n && code[i] !== '"') {
+            i++;
+          }
+          if (i < n) i++;
+          result += code.slice(start, i);
+          continue;
+        }
+        const sub = code.slice(i);
+        const isRem = sub.toUpperCase().startsWith("REM");
+        const prevChar = i > 0 ? code[i - 1] : " ";
+        const nextChar = i + 3 < n ? code[i + 3] : " ";
+        if (isRem && !/[a-zA-Z0-9_]/.test(prevChar) && !/[a-zA-Z0-9_]/.test(nextChar)) {
+          result += code.slice(i);
+          break;
+        }
+        const segStart = i;
+        while (i < n && code[i] !== '"') {
+          const sub2 = code.slice(i);
+          if (sub2.toUpperCase().startsWith("REM")) {
+            const p = i > 0 ? code[i - 1] : " ";
+            const nx = i + 3 < n ? code[i + 3] : " ";
+            if (!/[a-zA-Z0-9_]/.test(p) && !/[a-zA-Z0-9_]/.test(nx)) {
+              break;
+            }
+          }
+          i++;
+        }
+        let seg = code.slice(segStart, i);
+        seg = seg.replace(/ *(<=|>=|<>|<|>|=|\*|\/|\^|:|;|,|\(|\)) */g, "$1");
+        seg = seg.replace(/(?<=[^+]) *\+ *(?=[^+])/g, "+");
+        seg = seg.replace(/(?<=[^-]) *- *(?=[^-])/g, "-");
+        seg = seg.replace(/ {2,}/g, " ");
+        if (/[=+\-*\/^<>(),;:]\s*$/.test(seg)) {
+          seg = seg.replace(/\s+$/, "");
+        }
+        if (/^\s*[=+\-*\/^<>(),;:]/.test(seg) && result.endsWith('"')) {
+          seg = seg.replace(/^\s+/, "");
+        }
+        result += seg;
+      }
+      return result.trim();
+    }
     function compileJBas2(sourceText, options = {}) {
       const start = typeof options.start === "number" ? options.start : 10;
       const step = typeof options.step === "number" ? options.step : 10;
       const keepComments = !!options.keepComments;
+      const compactWhitespace = !!options.compactWhitespace;
       const rawLines = sourceText.split(/\r?\n/);
       const isCrlf = sourceText.includes("\r\n");
       const eol = isCrlf ? "\r\n" : "\n";
@@ -446,7 +498,10 @@ var require_jbas2bas = __commonJS({
       }
       const outputLines = [];
       for (const stmt of statements) {
-        const resolvedCode = replaceLabelsOutsideStrings(stmt.code, labelMap, errors, stmt.origLineNum);
+        let resolvedCode = replaceLabelsOutsideStrings(stmt.code, labelMap, errors, stmt.origLineNum);
+        if (compactWhitespace) {
+          resolvedCode = compactWhitespaceOutsideStrings(resolvedCode);
+        }
         outputLines.push(`${stmt.lineNum} ${resolvedCode}`);
       }
       const resultText = outputLines.join(eol) + eol;
@@ -527,9 +582,9 @@ Options:
       process.exit(ok ? 0 : 1);
     }
     function transpileJBasAllVersions2(sourceText) {
-      const compact = compileJBas2(sourceText, { start: 1, step: 1, keepComments: false });
-      const step10 = compileJBas2(sourceText, { start: 10, step: 10, keepComments: false });
-      const comments = compileJBas2(sourceText, { start: 10, step: 10, keepComments: true });
+      const compact = compileJBas2(sourceText, { start: 1, step: 1, keepComments: false, compactWhitespace: true });
+      const step10 = compileJBas2(sourceText, { start: 10, step: 10, keepComments: false, compactWhitespace: false });
+      const comments = compileJBas2(sourceText, { start: 10, step: 10, keepComments: true, compactWhitespace: false });
       const errors = [.../* @__PURE__ */ new Set([...compact.errors, ...step10.errors, ...comments.errors])];
       const success = compact.success && step10.success && comments.success;
       return {
@@ -544,6 +599,7 @@ Options:
       stripComments,
       convertCommentsToRem,
       replaceLabelsOutsideStrings,
+      compactWhitespaceOutsideStrings,
       compileJBas: compileJBas2,
       compileJBasFile,
       transpileJBasAllVersions: transpileJBasAllVersions2
