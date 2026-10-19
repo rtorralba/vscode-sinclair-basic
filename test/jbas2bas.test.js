@@ -150,10 +150,10 @@ GO TO @start
   const all = transpileJBasAllVersions(source);
   assert.equal(all.success, true);
 
-  // Compact: 1 by 1, without comments and with compacted operator whitespace (most optimal for TAP)
+  // Compact: 1 by 1, without comments, with compacted operator whitespace and attribute optimization
   const compactLines = all.compact.text.trim().split(/\r?\n/);
   assert.equal(compactLines[0], '1 BORDER 0:INK 7:PAPER 0:CLS');
-  assert.equal(compactLines[1], '2 PRINT AT 10,10;"SCORE: ";score');
+  assert.equal(compactLines[1], '2 PRINT "{AT 10,10}SCORE: ";score');
   assert.equal(compactLines[2], '3 LET a=1:LET b=2:LET c=3');
   assert.equal(compactLines[3], '4 GO TO 1');
 
@@ -171,6 +171,56 @@ GO TO @start
   assert.equal(commentsLines[2], '30 PRINT AT 10,10; "SCORE: "; score: REM Show score');
   assert.equal(commentsLines[3], '40 LET a=1 : LET b=2 : LET c=3');
   assert.equal(commentsLines[4], '50 GO TO 20');
+});
+
+test('optimizeAttributesAndStrings folds constant CHR$ chains and optimizes PRINT attributes', () => {
+  const { optimizeAttributesAndStrings } = require('../src/core/jbas2bas.js');
+
+  // Dino user case: LET c$ = CHR$ 17 + CHR$ 4 + " " + CHR$ 17 + CHR$ 1 + " "
+  assert.equal(
+    optimizeAttributesAndStrings('LET c$ = CHR$ 17 + CHR$ 4 + " " + CHR$ 17 + CHR$ 1 + " "'),
+    'LET c$ = "{PAPER 4} {PAPER 1} "'
+  );
+
+  // Dino user case: complex p$ with PAPER, INK, FLASH
+  assert.equal(
+    optimizeAttributesAndStrings('LET p$ = CHR$ 17 + CHR$ 3 + CHR$ 16 + CHR$ 2 + CHR$ 18 + CHR$ 1 + " " + CHR$ 17 + CHR$ 1 + CHR$ 18 + CHR$ 0 + " "'),
+    'LET p$ = "{PAPER 3}{INK 2}{FLASH 1} {PAPER 1}{FLASH 0} "'
+  );
+
+  // Dino user case: y$ coordinate array of bytes
+  assert.equal(
+    optimizeAttributesAndStrings('LET y$ = CHR$ 19 + CHR$ 17 + CHR$ 16 + CHR$ 16 + CHR$ 17 + CHR$ 19 + CHR$ 20'),
+    'LET y$ = "{CODE 19}{CODE 17}{CODE 16}{CODE 16}{CODE 17}{CODE 19}{CODE 20}"'
+  );
+
+  // Dino user case: PRINT with dynamic variables and constant attributes
+  assert.equal(
+    optimizeAttributesAndStrings('IF py<>oldpy THEN PRINT AT oldpy,5; " ";AT py,5; PAPER 2;" "'),
+    'IF py<>oldpy THEN PRINT AT oldpy,5; " ";AT py,5; "{PAPER 2} "'
+  );
+
+  // Multiple constant AT and text prints combined
+  assert.equal(
+    optimizeAttributesAndStrings('PRINT AT 10, 1; "THERE IS NO INTERNET CONNECTION"; AT 12, 1; "LOADING..."'),
+    'PRINT "{AT 10,1}THERE IS NO INTERNET CONNECTION{AT 12,1}LOADING..."'
+  );
+
+  // Standalone BORDER / INK / PAPER commands are NOT altered
+  assert.equal(
+    optimizeAttributesAndStrings('BORDER 0: INK 7: PAPER 0: CLS'),
+    'BORDER 0: INK 7: PAPER 0: CLS'
+  );
+
+  // Row 13 or Column 13 are NEVER absorbed into strings because byte 13 (0x0D) is Enter in Sinclair BASIC ROM
+  assert.equal(
+    optimizeAttributesAndStrings('PRINT AT 13, 7; PAPER 7; "                   "'),
+    'PRINT AT 13, 7; "{PAPER 7}                   "'
+  );
+  assert.equal(
+    optimizeAttributesAndStrings('PRINT AT 10, 13; PAPER 7; "TEXT"'),
+    'PRINT AT 10, 13; "{PAPER 7}TEXT"'
+  );
 });
 
 test('compactWhitespaceOutsideStrings compacts spaces around operators while protecting strings and REM', () => {

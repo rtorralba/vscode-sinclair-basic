@@ -137,6 +137,35 @@ test('tokenizeLine does not encode digits inside multi-char variable names as nu
   assert.equal(numMarkers, 2, 'Only literal numbers 1 and 10 should have 0x0E markers');
 });
 
+test('tokenizeLine correctly parses bas2tap control codes {PAPER n}, {INK n}, {AT y,x} inside strings', () => {
+  const line = 'LET c$ = "{PAPER 4} {PAPER 1} "';
+  const tokens = tokenizeLine(line);
+
+  // String quotes are 0x22
+  const firstQuote = tokens.indexOf(0x22);
+  const secondQuote = tokens.indexOf(0x22, firstQuote + 1);
+  const stringBytes = tokens.slice(firstQuote + 1, secondQuote);
+
+  // Expected bytes inside quotes:
+  // {PAPER 4} -> 17, 4
+  // ' '        -> 32
+  // {PAPER 1} -> 17, 1
+  // ' '        -> 32
+  assert.deepEqual(Array.from(stringBytes), [17, 4, 32, 17, 1, 32]);
+
+  // Test AT, INK, FLASH
+  const line2 = 'PRINT "{AT 10,5}{INK 2}{FLASH 1}HI"';
+  const tokens2 = tokenizeLine(line2);
+  const q1 = tokens2.indexOf(0x22);
+  const q2 = tokens2.indexOf(0x22, q1 + 1);
+  const strBytes2 = tokens2.slice(q1 + 1, q2);
+  // {AT 10,5} -> 22, 10, 5
+  // {INK 2}   -> 16, 2
+  // {FLASH 1} -> 18, 1
+  // 'HI'      -> 72, 73
+  assert.deepEqual(Array.from(strBytes2), [22, 10, 5, 16, 2, 18, 1, 72, 73]);
+});
+
 test('generateTapFile writes a valid .tap file to disk', () => {
   const code = '10 PRINT "TEST TAP FILE": STOP';
   const outPath = path.join(__dirname, 'tmp', 'test_output.tap');
@@ -148,5 +177,45 @@ test('generateTapFile writes a valid .tap file to disk', () => {
 
   // Clean up
   fs.unlinkSync(outPath);
+});
+
+test('end-to-end: transpiling .jbas with CHR$ concatenation folds to control codes and compiles to valid TAP', () => {
+  const { transpileJBasAllVersions } = require('../src/core/jbas2bas.js');
+  const jbasSource = `
+LET c$ = CHR$ 17 + CHR$ 4 + " " + CHR$ 17 + CHR$ 1 + " "
+PRINT AT 20, 0; PAPER 2; " "
+`;
+  const transpiled = transpileJBasAllVersions(jbasSource);
+  assert.equal(transpiled.success, true);
+
+  // Compact code should have folded "{PAPER 4} {PAPER 1} " and "{AT 20,0}{PAPER 2} "
+  assert.ok(transpiled.compact.text.includes('LET c$="{PAPER 4} {PAPER 1} "'));
+  assert.ok(transpiled.compact.text.includes('PRINT "{AT 20,0}{PAPER 2} "'));
+
+  // Compile to TAP blocks
+  const blocks = bas2tap(transpiled.compact.text, 'test', 1);
+  assert.equal(blocks.length, 2);
+  const dataBlock = blocks[1];
+
+  // Find the string bytes inside the data block: 17, 4, 32, 17, 1, 32
+  let foundC = false;
+  for (let i = 0; i < dataBlock.length - 6; i++) {
+    if (dataBlock[i] === 17 && dataBlock[i+1] === 4 && dataBlock[i+2] === 32 &&
+        dataBlock[i+3] === 17 && dataBlock[i+4] === 1 && dataBlock[i+5] === 32) {
+      foundC = true;
+      break;
+    }
+  }
+  assert.ok(foundC, 'TAP binary should contain exact folded control bytes [17, 4, 32, 17, 1, 32]');
+
+  // Find the PAPER control code inside TAP data block: 17, 2, 32
+  let foundPaper = false;
+  for (let i = 0; i < dataBlock.length - 3; i++) {
+    if (dataBlock[i] === 17 && dataBlock[i+1] === 2 && dataBlock[i+2] === 32) {
+      foundPaper = true;
+      break;
+    }
+  }
+  assert.ok(foundPaper, 'TAP binary should contain exact folded PAPER control bytes [17, 2, 32]');
 });
 

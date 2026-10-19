@@ -66,7 +66,6 @@ vscode-sinclair-basic/
 |   |-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
 |   +-- tapGenerator.test.js             # Unit tests for pure JS tap generator
 |-- AGENTS.md                            # Complete AI instructions (this file)
-|-- GEMINI.md                            # Mirrored AI instructions for Gemini / Antigravity
 |-- README.md                            # User-facing documentation & quickstart
 |-- LICENSE                              # MIT License
 +-- package.json                         # Extension manifest, language definitions & configuration schema
@@ -88,10 +87,13 @@ vscode-sinclair-basic/
      - Pass 2: Substitutes `@label` references outside strings with mapped line numbers.
    - Detects and reports undefined labels and duplicate definitions.
    - Smart whitespace compaction (`compactWhitespaceOutsideStrings`): For the compact optimal build (`dist/<filename>.bas`), strips redundant spaces around operators (`=`, `+`, `-`, `*`, `/`, `^`, `<`, `>`, `<=`, `>=`, `<>`, `(`, `)`, `,`, `;`, `:`), preserving spaces inside string literals and `REM` comments while keeping `step10` readable.
+   - **Attribute & String Constant Optimization (`optimizeAttributesAndStrings`)**: Automatically folds constant `CHR$` chains (e.g. `CHR$ 17 + CHR$ 4 + " "` -> `"{PAPER 4} "`) and absorbs constant display attributes and coordinates in `PRINT` (`PRINT AT 10,1; "TEXT"` -> `PRINT "{AT 10,1}TEXT"`, `PRINT PAPER 2; " "` -> `PRINT "{PAPER 2} "`) for maximum execution speed in ZX Spectrum ROM.
+   - **ZX Spectrum ROM `0x0D` (Enter) Safeguard**: Row 13 or Column 13 in `AT row, col` are strictly NEVER absorbed into string literals (e.g. `PRINT AT 13, 7; "{PAPER 7} "`). In the ZX Spectrum ROM, byte `13` (`0x0D`) is the line terminator (`Enter`). If byte 13 appears inside string literals within program lines, the ROM parser thinks the line ended before the closing quote and halts with error `C Nonsense in BASIC`.
 
 3. **Pure JavaScript TAP Generator (`src/core/tapGenerator.js`)**:
    - Native Sinclair BASIC tokenizer and ZX Spectrum `.tap` generator written in pure JS.
    - Encodes Sinclair BASIC token bytes (0x80-0xFF), ZX Spectrum floating-point numbers, UDGs, and line lengths.
+   - Full support for `bas2tap` control escape sequences inside string literals: `{PAPER n}`, `{INK n}`, `{FLASH n}`, `{BRIGHT n}`, `{INVERSE n}`, `{OVER n}`, `{AT y, x}`, `{TAB x}`, `{CODE n}`, `{#HH}`, and `\xHH`.
    - Exact whitespace parity with `bas2tap`: Automatically consumes trailing spaces after keywords/tokens, `:` statement separators, and `REM` to prevent double spaces when listed on the ZX Spectrum ROM (e.g. `LET py=0` and `CHR$ 18`).
    - Zero external binary requirements (no `bas2tap.exe` needed by default).
 
@@ -117,7 +119,7 @@ vscode-sinclair-basic/
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 26 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 29 passing tests.
 
 ---
 
@@ -152,3 +154,6 @@ When you open this project in VS Code, here is what is ready to be done:
 4. **MUY IMPORTANTE: Generación de TAP siempre con la versión más óptima**:
    - Para compilar a imagen de cinta `.tap`, se DEBE usar SIEMPRE la versión más óptima: **líneas de 1 en 1, sin comentarios y con compactación de espacios en operadores** (`dist/<filename>.bas`).
    - Esto minimiza drásticamente los bytes en la cinta, reduce el consumo de memoria RAM en el ZX Spectrum y agiliza la velocidad de ejecución del intérprete de Sinclair BASIC al evitar saltar sobre o procesar líneas de comentarios `REM`.
+5. **NUNCA emitir byte 13 (0x0D) dentro de cadenas literales de Sinclair BASIC**:
+   - El byte `13` (`0x0D`) es el carácter de salto de línea / `ENTER` en la ROM del Sinclair ZX Spectrum.
+   - Si un literal de cadena en una línea contiene el byte 13 (por ejemplo, `{AT 13, col}` o `{CODE 13}`), el analizador de la ROM cree que la línea ha terminado antes de cerrar las comillas y aborta con el error `C Nonsense in BASIC`. Por tanto, `AT 13, col` y `AT row, 13` se deben mantener siempre en sintaxis estándar de Sinclair BASIC fuera de las comillas.

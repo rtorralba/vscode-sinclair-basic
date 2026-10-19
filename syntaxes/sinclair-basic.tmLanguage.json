@@ -45,12 +45,16 @@
       ]
     },
     "strings": {
-      "name": "string.quoted.double.jbas",
+      "name": "string.quoted.double.sinclair-basic",
       "begin": "\"",
       "end": "\"",
       "patterns": [
         {
-          "name": "constant.character.escape.jbas",
+          "name": "constant.character.escape.control.sinclair-basic",
+          "match": "\\{(?i:INK|PAPER|FLASH|BRIGHT|INVERSE|OVER|AT|TAB|CODE|#[0-9A-Fa-f]{1,2}|\\\\x[0-9A-Fa-f]{1,2}|[A-Ua-u])\\b[^}]*\\}"
+        },
+        {
+          "name": "constant.character.escape.sinclair-basic",
           "match": "\\\\."
         }
       ]

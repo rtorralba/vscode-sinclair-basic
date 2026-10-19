@@ -114,22 +114,118 @@ function tokenizeLine(line) {
       res.push(line.charCodeAt(i));
       i++;
       while (i < line.length && line[i] !== '"') {
-        // UDG in {A}..{U} format
-        if (line[i] === '{' && i + 2 < line.length && line[i + 2] === '}') {
-          const udg = line[i + 1].toUpperCase();
-          const code = udg.charCodeAt(0);
-          if (code >= 65 && code <= 85) {
-            res.push(144 + code - 65);
-            i += 3;
-            continue;
+        // Control sequences or UDG in {...} format (matching bas2tap)
+        if (line[i] === '{') {
+          const closeIdx = line.indexOf('}', i + 1);
+          const nextQuote = line.indexOf('"', i + 1);
+          if (closeIdx !== -1 && (nextQuote === -1 || closeIdx < nextQuote)) {
+            const content = line.slice(i + 1, closeIdx).trim();
+            const upper = content.toUpperCase();
+
+            // 1. Single letter UDG {A}..{U}
+            if (content.length === 1 && upper >= 'A' && upper <= 'U') {
+              res.push(144 + upper.charCodeAt(0) - 65);
+              i = closeIdx + 1;
+              continue;
+            }
+
+            // 2. Control codes: INK, PAPER, FLASH, BRIGHT, INVERSE, OVER
+            let m = upper.match(/^INK\s+(\d+)$/);
+            if (m) {
+              res.push(16, parseInt(m[1], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^PAPER\s+(\d+)$/);
+            if (m) {
+              res.push(17, parseInt(m[1], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^FLASH\s+(\d+)$/);
+            if (m) {
+              res.push(18, parseInt(m[1], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^BRIGHT\s+(\d+)$/);
+            if (m) {
+              res.push(19, parseInt(m[1], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^INVERSE\s+(\d+)$/);
+            if (m) {
+              res.push(20, parseInt(m[1], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^OVER\s+(\d+)$/);
+            if (m) {
+              res.push(21, parseInt(m[1], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^AT\s+(\d+)\s*,\s*(\d+)$/);
+            if (m) {
+              res.push(22, parseInt(m[1], 10) & 0xFF, parseInt(m[2], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^TAB\s+(\d+)(?:\s*,\s*(\d+))?$/);
+            if (m) {
+              if (m[2] !== undefined) {
+                res.push(23, parseInt(m[1], 10) & 0xFF, parseInt(m[2], 10) & 0xFF);
+              } else {
+                const tabVal = parseInt(m[1], 10);
+                res.push(23, tabVal & 0xFF, (tabVal >> 8) & 0xFF);
+              }
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^CODE\s+(\d+)$/);
+            if (m) {
+              res.push(parseInt(m[1], 10) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^#([0-9A-F]{1,2})$/);
+            if (m) {
+              res.push(parseInt(m[1], 16) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^\\X([0-9A-F]{1,2})$/);
+            if (m) {
+              res.push(parseInt(m[1], 16) & 0xFF);
+              i = closeIdx + 1;
+              continue;
+            }
           }
         }
-        // UDG in \A..\U format
-        if (line[i] === '\\' && i + 1 < line.length) {
-          const udg = line[i + 1].toUpperCase();
-          const code = udg.charCodeAt(0);
-          if (code >= 65 && code <= 85) {
-            res.push(144 + code - 65);
+
+        // Backslash escapes: \A..\U, \xHH, \\, \"
+        if (line[i] === '\\') {
+          // UDG in \A..\U format
+          if (i + 1 < line.length) {
+            const udg = line[i + 1].toUpperCase();
+            const code = udg.charCodeAt(0);
+            if (code >= 65 && code <= 85) {
+              res.push(144 + code - 65);
+              i += 2;
+              continue;
+            }
+          }
+          // Hex escape \xHH
+          const hexMatch = line.slice(i).match(/^\\x([0-9a-fA-F]{2})/i);
+          if (hexMatch) {
+            res.push(parseInt(hexMatch[1], 16) & 0xFF);
+            i += 4;
+            continue;
+          }
+          // Escaped backslash \\ or escaped quote \"
+          if (i + 1 < line.length && (line[i + 1] === '\\' || line[i + 1] === '"')) {
+            res.push(line.charCodeAt(i + 1));
             i += 2;
             continue;
           }

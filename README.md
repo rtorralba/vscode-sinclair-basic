@@ -35,7 +35,29 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
   * **Automatic Indentation**: Writing `@label:` and pressing `Enter` automatically indents the code block inwards.
   * **Duplicate Label Detection**: Flags duplicate label definitions with real-time error diagnostics in the editor and halts compilation with line details.
   * Single-quote inline comments: `' this is a comment` (preserving single quotes inside string literals like `PRINT "DON'T"`).
-  * **Optimized Whitespace Compaction**: Automatically strips redundant whitespace around operators (`=`, `+`, `-`, `*`, `/`, `^`, `<`, `>`, `<=`, `>=`, `<>`, `(`, `)`, `,`, `;`, `:`) in the compact version (`dist/<name>.bas`) to minimize RAM consumption and TAP file size, while preserving readable spacing in `dist/<name>-step10.bas`.
+  * **Inline Control Codes & Maximum Performance Optimization**:
+    * **Standard `bas2tap` Escape Sequences**: Full support for inline control sequences inside string literals: `{PAPER n}`, `{INK n}`, `{FLASH n}`, `{BRIGHT n}`, `{INVERSE n}`, `{OVER n}`, `{AT row, col}`, `{TAB x}`, `{CODE n}`, and `\xHH`.
+    * **Real-time Color Preview in `LIST`**: In the ZX Spectrum emulator or real hardware, running `LIST` directly executes the color attribute bytes, rendering authentic colored character blocks (e.g. green or magenta squares) inside the quotes in real time.
+    * **Constant Expression Folding**: Automatically converts slow runtime `CHR$` concatenations:
+      ```basic
+      ' Source code in .jbas:
+      LET c$ = CHR$ 17 + CHR$ 4 + " " + CHR$ 17 + CHR$ 1 + " "
+      ' Automatically folded in optimal dist/<name>.bas:
+      LET c$="{PAPER 4} {PAPER 1} "
+      ```
+      This eliminates runtime string allocations, garbage collection pauses, and floating-point math on the Z80.
+    * **PRINT Attribute Inlining**: In `PRINT` statements, automatically absorbs constant screen attributes into the following string literals:
+      ```basic
+      ' Source:
+      PRINT AT 10, 1; "THERE IS NO INTERNET CONNECTION"
+      IF py<>oldpy THEN PRINT AT oldpy,5; " "; AT py,5; PAPER 2; " "
+
+      ' Optimal build:
+      PRINT "{AT 10,1}THERE IS NO INTERNET CONNECTION"
+      IF py<>oldpy THEN PRINT AT oldpy,5; " "; AT py,5; "{PAPER 2} "
+      ```
+      Bypasses the ROM's expression evaluator loop, saves ~14 bytes of hidden floating-point numbers per `AT`, and dramatically speeds up game frame rates.
+    * **ZX Spectrum ROM `0x0D` Guard**: Automatically preserves `AT 13, col` and `AT row, 13` in standard Sinclair BASIC syntax (`PRINT AT 13, 7; "{PAPER 7} "`). This safeguards against injecting byte 13 (`0x0D` / `ENTER`) inside string literals, which would cause the ZX Spectrum ROM parser to prematurely terminate the line and throw error `C Nonsense in BASIC`.
   * Transpiles to clean, standard numbered `.bas` or compiles directly to `.tap`.
 
 ### 2. Intelligent Line Renumbering (`.bas`)

@@ -424,11 +424,163 @@ var require_jbas2bas = __commonJS({
       }
       return result.trim();
     }
+    function foldStringTerms(terms) {
+      let folded = "";
+      let k = 0;
+      while (k < terms.length) {
+        const t = terms[k];
+        if (t.type === "str") {
+          folded += t.value;
+          k++;
+          continue;
+        }
+        if (t.type === "chr") {
+          const code = t.value;
+          const next = terms[k + 1];
+          if (code === 16 && next && next.type === "chr" && next.value >= 0 && next.value <= 9) {
+            folded += `{INK ${next.value}}`;
+            k += 2;
+            continue;
+          }
+          if (code === 17 && next && next.type === "chr" && next.value >= 0 && next.value <= 9) {
+            folded += `{PAPER ${next.value}}`;
+            k += 2;
+            continue;
+          }
+          if (code === 18 && next && next.type === "chr" && (next.value === 0 || next.value === 1 || next.value === 8)) {
+            folded += `{FLASH ${next.value}}`;
+            k += 2;
+            continue;
+          }
+          if (code === 19 && next && next.type === "chr" && (next.value === 0 || next.value === 1 || next.value === 8)) {
+            folded += `{BRIGHT ${next.value}}`;
+            k += 2;
+            continue;
+          }
+          if (code === 20 && next && next.type === "chr" && (next.value === 0 || next.value === 1)) {
+            folded += `{INVERSE ${next.value}}`;
+            k += 2;
+            continue;
+          }
+          if (code === 21 && next && next.type === "chr" && (next.value === 0 || next.value === 1)) {
+            folded += `{OVER ${next.value}}`;
+            k += 2;
+            continue;
+          }
+          const next2 = terms[k + 2];
+          if (code === 22 && next && next.type === "chr" && next.value >= 0 && next.value <= 21 && next.value !== 13 && next2 && next2.type === "chr" && next2.value >= 0 && next2.value <= 31 && next2.value !== 13) {
+            folded += `{AT ${next.value},${next2.value}}`;
+            k += 3;
+            continue;
+          }
+          if (code === 13) {
+            folded += '"+CHR$ 13+"';
+          } else if (code >= 32 && code <= 126 && code !== 34 && code !== 123 && code !== 125) {
+            folded += String.fromCharCode(code);
+          } else {
+            folded += `{CODE ${code}}`;
+          }
+          k++;
+        }
+      }
+      return `"${folded}"`;
+    }
+    function optimizeAttributesAndStrings(code) {
+      let remIndex = -1;
+      let inStr = false;
+      for (let i = 0; i < code.length; i++) {
+        if (code[i] === '"') {
+          inStr = !inStr;
+        } else if (!inStr) {
+          if (code.slice(i, i + 3).toUpperCase() === "REM") {
+            const prev = i > 0 ? code[i - 1] : " ";
+            const next = i + 3 < code.length ? code[i + 3] : " ";
+            if (!/[a-zA-Z0-9_]/.test(prev) && !/[a-zA-Z0-9_]/.test(next)) {
+              remIndex = i;
+              break;
+            }
+          }
+        }
+      }
+      let mainCode = remIndex !== -1 ? code.slice(0, remIndex) : code;
+      const remPart = remIndex !== -1 ? code.slice(remIndex) : "";
+      const chainRegex = /(?:\"[^\"]*\"|CHR\$\s*\(?\s*\d+\s*\)?)(?:\s*\+\s*(?:\"[^\"]*\"|CHR\$\s*\(?\s*\d+\s*\)?))+/gi;
+      mainCode = mainCode.replace(chainRegex, (match) => {
+        const terms = [];
+        const termRegex = /\"([^\"]*)\"|CHR\$\s*\(?\s*(\d+)\s*\)?/gi;
+        let m;
+        while ((m = termRegex.exec(match)) !== null) {
+          if (m[1] !== void 0) {
+            terms.push({ type: "str", value: m[1] });
+          } else if (m[2] !== void 0) {
+            terms.push({ type: "chr", value: parseInt(m[2], 10) });
+          }
+        }
+        if (terms.length >= 2) {
+          return foldStringTerms(terms);
+        }
+        return match;
+      });
+      const statements = [];
+      let stmtStart = 0;
+      inStr = false;
+      for (let i = 0; i < mainCode.length; i++) {
+        if (mainCode[i] === '"') {
+          inStr = !inStr;
+        } else if (!inStr && mainCode[i] === ":") {
+          statements.push(mainCode.slice(stmtStart, i));
+          stmtStart = i + 1;
+        }
+      }
+      statements.push(mainCode.slice(stmtStart));
+      const optimizedStmts = statements.map((stmt) => {
+        if (!/\b(?:PRINT|LPRINT)\b/i.test(stmt)) {
+          return stmt;
+        }
+        let s = stmt;
+        let prev;
+        do {
+          prev = s;
+          s = s.replace(/\bAT\s+(\d+)\s*,\s*(\d+)\s*;?\s*\"([^\"]*)\"/gi, (match, y, x, txt) => {
+            const row = parseInt(y, 10);
+            const col = parseInt(x, 10);
+            if (row === 13 || col === 13) {
+              return match;
+            }
+            return `"{AT ${y},${x}}${txt}"`;
+          });
+          s = s.replace(/\bINK\s+(\d+)\s*;?\s*\"([^\"]*)\"/gi, (_, c, txt) => {
+            return `"{INK ${c}}${txt}"`;
+          });
+          s = s.replace(/\bPAPER\s+(\d+)\s*;?\s*\"([^\"]*)\"/gi, (_, c, txt) => {
+            return `"{PAPER ${c}}${txt}"`;
+          });
+          s = s.replace(/\bFLASH\s+(\d+)\s*;?\s*\"([^\"]*)\"/gi, (_, f, txt) => {
+            return `"{FLASH ${f}}${txt}"`;
+          });
+          s = s.replace(/\bBRIGHT\s+(\d+)\s*;?\s*\"([^\"]*)\"/gi, (_, b, txt) => {
+            return `"{BRIGHT ${b}}${txt}"`;
+          });
+          s = s.replace(/\bINVERSE\s+(\d+)\s*;?\s*\"([^\"]*)\"/gi, (_, v, txt) => {
+            return `"{INVERSE ${v}}${txt}"`;
+          });
+          s = s.replace(/\bOVER\s+(\d+)\s*;?\s*\"([^\"]*)\"/gi, (_, o, txt) => {
+            return `"{OVER ${o}}${txt}"`;
+          });
+          s = s.replace(/\"([^\"]*)\"\s*;\s*\"([^\"]*)\"/g, (_, s1, s2) => {
+            return `"${s1}${s2}"`;
+          });
+        } while (s !== prev);
+        return s;
+      });
+      return optimizedStmts.join(":") + remPart;
+    }
     function compileJBas2(sourceText, options = {}) {
       const start = typeof options.start === "number" ? options.start : 10;
       const step = typeof options.step === "number" ? options.step : 10;
       const keepComments = !!options.keepComments;
       const compactWhitespace = !!options.compactWhitespace;
+      const optimizeAttributes = options.optimizeAttributes !== void 0 ? !!options.optimizeAttributes : compactWhitespace;
       const rawLines = sourceText.split(/\r?\n/);
       const isCrlf = sourceText.includes("\r\n");
       const eol = isCrlf ? "\r\n" : "\n";
@@ -499,6 +651,9 @@ var require_jbas2bas = __commonJS({
       const outputLines = [];
       for (const stmt of statements) {
         let resolvedCode = replaceLabelsOutsideStrings(stmt.code, labelMap, errors, stmt.origLineNum);
+        if (optimizeAttributes) {
+          resolvedCode = optimizeAttributesAndStrings(resolvedCode);
+        }
         if (compactWhitespace) {
           resolvedCode = compactWhitespaceOutsideStrings(resolvedCode);
         }
@@ -600,6 +755,8 @@ Options:
       convertCommentsToRem,
       replaceLabelsOutsideStrings,
       compactWhitespaceOutsideStrings,
+      foldStringTerms,
+      optimizeAttributesAndStrings,
       compileJBas: compileJBas2,
       compileJBasFile,
       transpileJBasAllVersions: transpileJBasAllVersions2
@@ -776,20 +933,108 @@ var require_tapGenerator = __commonJS({
           res.push(line.charCodeAt(i));
           i++;
           while (i < line.length && line[i] !== '"') {
-            if (line[i] === "{" && i + 2 < line.length && line[i + 2] === "}") {
-              const udg = line[i + 1].toUpperCase();
-              const code = udg.charCodeAt(0);
-              if (code >= 65 && code <= 85) {
-                res.push(144 + code - 65);
-                i += 3;
-                continue;
+            if (line[i] === "{") {
+              const closeIdx = line.indexOf("}", i + 1);
+              const nextQuote = line.indexOf('"', i + 1);
+              if (closeIdx !== -1 && (nextQuote === -1 || closeIdx < nextQuote)) {
+                const content = line.slice(i + 1, closeIdx).trim();
+                const upper = content.toUpperCase();
+                if (content.length === 1 && upper >= "A" && upper <= "U") {
+                  res.push(144 + upper.charCodeAt(0) - 65);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                let m = upper.match(/^INK\s+(\d+)$/);
+                if (m) {
+                  res.push(16, parseInt(m[1], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^PAPER\s+(\d+)$/);
+                if (m) {
+                  res.push(17, parseInt(m[1], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^FLASH\s+(\d+)$/);
+                if (m) {
+                  res.push(18, parseInt(m[1], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^BRIGHT\s+(\d+)$/);
+                if (m) {
+                  res.push(19, parseInt(m[1], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^INVERSE\s+(\d+)$/);
+                if (m) {
+                  res.push(20, parseInt(m[1], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^OVER\s+(\d+)$/);
+                if (m) {
+                  res.push(21, parseInt(m[1], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^AT\s+(\d+)\s*,\s*(\d+)$/);
+                if (m) {
+                  res.push(22, parseInt(m[1], 10) & 255, parseInt(m[2], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^TAB\s+(\d+)(?:\s*,\s*(\d+))?$/);
+                if (m) {
+                  if (m[2] !== void 0) {
+                    res.push(23, parseInt(m[1], 10) & 255, parseInt(m[2], 10) & 255);
+                  } else {
+                    const tabVal = parseInt(m[1], 10);
+                    res.push(23, tabVal & 255, tabVal >> 8 & 255);
+                  }
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^CODE\s+(\d+)$/);
+                if (m) {
+                  res.push(parseInt(m[1], 10) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^#([0-9A-F]{1,2})$/);
+                if (m) {
+                  res.push(parseInt(m[1], 16) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
+                m = upper.match(/^\\X([0-9A-F]{1,2})$/);
+                if (m) {
+                  res.push(parseInt(m[1], 16) & 255);
+                  i = closeIdx + 1;
+                  continue;
+                }
               }
             }
-            if (line[i] === "\\" && i + 1 < line.length) {
-              const udg = line[i + 1].toUpperCase();
-              const code = udg.charCodeAt(0);
-              if (code >= 65 && code <= 85) {
-                res.push(144 + code - 65);
+            if (line[i] === "\\") {
+              if (i + 1 < line.length) {
+                const udg = line[i + 1].toUpperCase();
+                const code = udg.charCodeAt(0);
+                if (code >= 65 && code <= 85) {
+                  res.push(144 + code - 65);
+                  i += 2;
+                  continue;
+                }
+              }
+              const hexMatch = line.slice(i).match(/^\\x([0-9a-fA-F]{2})/i);
+              if (hexMatch) {
+                res.push(parseInt(hexMatch[1], 16) & 255);
+                i += 4;
+                continue;
+              }
+              if (i + 1 < line.length && (line[i + 1] === "\\" || line[i + 1] === '"')) {
+                res.push(line.charCodeAt(i + 1));
                 i += 2;
                 continue;
               }

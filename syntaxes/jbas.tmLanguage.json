@@ -33,6 +33,10 @@
       "end": "\"",
       "patterns": [
         {
+          "name": "constant.character.escape.control.jbas",
+          "match": "\\{(?i:INK|PAPER|FLASH|BRIGHT|INVERSE|OVER|AT|TAB|CODE|#[0-9A-Fa-f]{1,2}|\\\\x[0-9A-Fa-f]{1,2}|[A-Ua-u])\\b[^}]*\\}"
+        },
+        {
           "name": "constant.character.escape.jbas",
           "match": "\\\\."
         }
