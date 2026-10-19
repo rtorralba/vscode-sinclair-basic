@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-title Sinclair BASIC - Build & Publish
+title Sinclair BASIC - Build ^& Publish
 
 :: Asegurar que estamos en el directorio del script
 cd /d "%~dp0"
