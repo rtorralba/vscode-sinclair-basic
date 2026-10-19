@@ -580,7 +580,7 @@ var require_jbas2bas = __commonJS({
       const step = typeof options.step === "number" ? options.step : 10;
       const keepComments = !!options.keepComments;
       const compactWhitespace = !!options.compactWhitespace;
-      const optimizeAttributes = options.optimizeAttributes !== void 0 ? !!options.optimizeAttributes : compactWhitespace;
+      const optimizeAttributes = options.optimizePrintAttributes !== void 0 ? !!options.optimizePrintAttributes : options.optimizeAttributes !== void 0 ? !!options.optimizeAttributes : compactWhitespace;
       const rawLines = sourceText.split(/\r?\n/);
       const isCrlf = sourceText.includes("\r\n");
       const eol = isCrlf ? "\r\n" : "\n";
@@ -736,10 +736,29 @@ Options:
       const ok = compileJBasFile(inputFile, outputFile, { start, step });
       process.exit(ok ? 0 : 1);
     }
-    function transpileJBasAllVersions2(sourceText) {
-      const compact = compileJBas2(sourceText, { start: 1, step: 1, keepComments: false, compactWhitespace: true });
-      const step10 = compileJBas2(sourceText, { start: 10, step: 10, keepComments: false, compactWhitespace: false });
-      const comments = compileJBas2(sourceText, { start: 10, step: 10, keepComments: true, compactWhitespace: false });
+    function transpileJBasAllVersions2(sourceText, options = {}) {
+      const optimizePrintAttributes = options.optimizePrintAttributes !== void 0 ? !!options.optimizePrintAttributes : options.optimizeAttributes !== void 0 ? !!options.optimizeAttributes : true;
+      const compact = compileJBas2(sourceText, {
+        start: 1,
+        step: 1,
+        keepComments: false,
+        compactWhitespace: true,
+        optimizePrintAttributes
+      });
+      const step10 = compileJBas2(sourceText, {
+        start: 10,
+        step: 10,
+        keepComments: false,
+        compactWhitespace: false,
+        optimizePrintAttributes
+      });
+      const comments = compileJBas2(sourceText, {
+        start: 10,
+        step: 10,
+        keepComments: true,
+        compactWhitespace: false,
+        optimizePrintAttributes: false
+      });
       const errors = [.../* @__PURE__ */ new Set([...compact.errors, ...step10.errors, ...comments.errors])];
       const success = compact.success && step10.success && comments.success;
       return {

@@ -161,9 +161,10 @@ function activate(context) {
 
     const config = vscode.workspace.getConfiguration('sinclairBasic');
     const outDirName = config.get('outputDirectory', 'dist');
+    const optimizePrintAttributes = config.get('optimizePrintAttributes', true);
 
     const sourceText = doc.getText();
-    const all = transpileJBasAllVersions(sourceText);
+    const all = transpileJBasAllVersions(sourceText, { optimizePrintAttributes });
 
     if (!all.success) {
       const errorMsg = all.errors.join('\n');
@@ -213,9 +214,10 @@ function activate(context) {
 
     const config = vscode.workspace.getConfiguration('sinclairBasic');
     const outDirName = config.get('outputDirectory', 'dist');
+    const optimizePrintAttributes = config.get('optimizePrintAttributes', true);
 
     const sourceText = doc.getText();
-    const all = transpileJBasAllVersions(sourceText);
+    const all = transpileJBasAllVersions(sourceText, { optimizePrintAttributes });
 
     if (!all.success) {
       const errorMsg = all.errors.join('\n');

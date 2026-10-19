@@ -445,7 +445,9 @@ function compileJBas(sourceText, options = {}) {
   const step = typeof options.step === 'number' ? options.step : 10;
   const keepComments = !!options.keepComments;
   const compactWhitespace = !!options.compactWhitespace;
-  const optimizeAttributes = options.optimizeAttributes !== undefined ? !!options.optimizeAttributes : compactWhitespace;
+  const optimizeAttributes = options.optimizePrintAttributes !== undefined
+    ? !!options.optimizePrintAttributes
+    : (options.optimizeAttributes !== undefined ? !!options.optimizeAttributes : compactWhitespace);
 
   const rawLines = sourceText.split(/\r?\n/);
   const isCrlf = sourceText.includes('\r\n');
@@ -663,10 +665,32 @@ Options:
  *   errors: string[]
  * }}
  */
-function transpileJBasAllVersions(sourceText) {
-  const compact = compileJBas(sourceText, { start: 1, step: 1, keepComments: false, compactWhitespace: true });
-  const step10 = compileJBas(sourceText, { start: 10, step: 10, keepComments: false, compactWhitespace: false });
-  const comments = compileJBas(sourceText, { start: 10, step: 10, keepComments: true, compactWhitespace: false });
+function transpileJBasAllVersions(sourceText, options = {}) {
+  const optimizePrintAttributes = options.optimizePrintAttributes !== undefined
+    ? !!options.optimizePrintAttributes
+    : (options.optimizeAttributes !== undefined ? !!options.optimizeAttributes : true);
+
+  const compact = compileJBas(sourceText, {
+    start: 1,
+    step: 1,
+    keepComments: false,
+    compactWhitespace: true,
+    optimizePrintAttributes
+  });
+  const step10 = compileJBas(sourceText, {
+    start: 10,
+    step: 10,
+    keepComments: false,
+    compactWhitespace: false,
+    optimizePrintAttributes
+  });
+  const comments = compileJBas(sourceText, {
+    start: 10,
+    step: 10,
+    keepComments: true,
+    compactWhitespace: false,
+    optimizePrintAttributes: false
+  });
 
   const errors = [...new Set([...compact.errors, ...step10.errors, ...comments.errors])];
   const success = compact.success && step10.success && comments.success;

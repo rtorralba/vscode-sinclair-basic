@@ -355,6 +355,12 @@
           "default": 10,
           "description": "Default step increment between line numbers for the Renumber command.",
           "order": 11
+        },
+        "sinclairBasic.optimizePrintAttributes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically optimize constant PRINT attribute modifiers (AT, PAPER, INK, FLASH, BRIGHT, etc.) into control code strings for maximum speed and memory savings on ZX Spectrum.",
+          "order": 12
         }
       }
     }

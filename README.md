@@ -110,10 +110,12 @@ You can customize the extension via VS Code Settings (`settings.json`):
   "sinclairBasic.outputDirectory": "dist",
   "sinclairBasic.autoStartLine": 0,
   "sinclairBasic.renumberStart": 10,
-  "sinclairBasic.renumberStep": 10
+  "sinclairBasic.renumberStep": 10,
+  "sinclairBasic.optimizePrintAttributes": true
 }
 ```
 
+* `sinclairBasic.optimizePrintAttributes`: Enabled by default (`true`). Automatically folds constant `PRINT` attributes (`AT`, `PAPER`, `INK`, `FLASH`, `BRIGHT`, etc.) into compact control code strings for peak ZX Spectrum execution speed while letting developers write standard, natural Sinclair BASIC in `.jbas`.
 * `sinclairBasic.emulatorType`: Set to `"turbo80"` (default, opens embedded web emulator) or `"external"` (launches Fuse or desktop emulator).
 * `sinclairBasic.turbo80Model`: Emulated ZX Spectrum machine (`48k`, `128k`, `plus2`, `plus2a`, `plus3`, `16k`).
 * `sinclairBasic.turbo80Crt`: Enables/disables authentic CRT television shader filter.

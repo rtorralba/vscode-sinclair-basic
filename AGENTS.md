@@ -87,7 +87,7 @@ vscode-sinclair-basic/
      - Pass 2: Substitutes `@label` references outside strings with mapped line numbers.
    - Detects and reports undefined labels and duplicate definitions.
    - Smart whitespace compaction (`compactWhitespaceOutsideStrings`): For the compact optimal build (`dist/<filename>.bas`), strips redundant spaces around operators (`=`, `+`, `-`, `*`, `/`, `^`, `<`, `>`, `<=`, `>=`, `<>`, `(`, `)`, `,`, `;`, `:`), preserving spaces inside string literals and `REM` comments while keeping `step10` readable.
-   - **Attribute & String Constant Optimization (`optimizeAttributesAndStrings`)**: Automatically folds constant `CHR$` chains (e.g. `CHR$ 17 + CHR$ 4 + " "` -> `"{PAPER 4} "`) and absorbs constant display attributes and coordinates in `PRINT` (`PRINT AT 10,1; "TEXT"` -> `PRINT "{AT 10,1}TEXT"`, `PRINT PAPER 2; " "` -> `PRINT "{PAPER 2} "`) for maximum execution speed in ZX Spectrum ROM.
+   - **Attribute & String Constant Optimization (`optimizeAttributesAndStrings`)**: Configurable vía `sinclairBasic.optimizePrintAttributes` (activado por defecto). Permite al programador escribir código Sinclair BASIC 100% estándar y natural (ej. `PRINT AT 10, 1; PAPER 2; "HOLA"`). El transpilador absorbe automáticamente las coordenadas y modificadores de color constantes en la cadena (`PRINT "{AT 10,1}{PAPER 2}HOLA"`), reduciendo llamadas al intérprete en la ROM del Spectrum. También pliega automáticamente cadenas concatenadas de `CHR$` constantes (`CHR$ 17 + CHR$ 4 + " "` -> `"{PAPER 4} "`).
    - **ZX Spectrum ROM `0x0D` (Enter) Safeguard**: Row 13 or Column 13 in `AT row, col` are strictly NEVER absorbed into string literals (e.g. `PRINT AT 13, 7; "{PAPER 7} "`). In the ZX Spectrum ROM, byte `13` (`0x0D`) is the line terminator (`Enter`). If byte 13 appears inside string literals within program lines, the ROM parser thinks the line ended before the closing quote and halts with error `C Nonsense in BASIC`.
 
 3. **Pure JavaScript TAP Generator (`src/core/tapGenerator.js`)**:
@@ -119,7 +119,7 @@ vscode-sinclair-basic/
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 29 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 30 passing tests.
 
 ---
 

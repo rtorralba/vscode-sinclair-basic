@@ -157,10 +157,10 @@ GO TO @start
   assert.equal(compactLines[2], '3 LET a=1:LET b=2:LET c=3');
   assert.equal(compactLines[3], '4 GO TO 1');
 
-  // Step 10: 10 by 10, without comments (preserves original spacing for readability)
+  // Step 10: 10 by 10, without comments (preserves original spacing for readability, with optimized attributes)
   const step10Lines = all.step10.text.trim().split(/\r?\n/);
   assert.equal(step10Lines[0], '10 BORDER 0: INK 7: PAPER 0: CLS');
-  assert.equal(step10Lines[1], '20 PRINT AT 10,10; "SCORE: "; score');
+  assert.equal(step10Lines[1], '20 PRINT "{AT 10,10}SCORE: "; score');
   assert.equal(step10Lines[2], '30 LET a=1 : LET b=2 : LET c=3');
   assert.equal(step10Lines[3], '40 GO TO 10');
 
@@ -258,4 +258,23 @@ test('compactWhitespaceOutsideStrings compacts spaces around operators while pro
     'LET a=1+2:REM Comment with spaces: 1 + 2 = 3'
   );
 });
+
+test('transpileJBasAllVersions respects optimizePrintAttributes option', () => {
+  const { transpileJBasAllVersions } = require('../src/core/jbas2bas.js');
+  const source = 'PRINT AT 10, 1; PAPER 2; "HELLO"';
+
+  // Enabled by default
+  const resDefault = transpileJBasAllVersions(source);
+  assert.ok(resDefault.compact.text.includes('PRINT "{AT 10,1}{PAPER 2}HELLO"'));
+  assert.ok(resDefault.step10.text.includes('PRINT "{AT 10,1}{PAPER 2}HELLO"'));
+  // Comments version preserves human-readable original BASIC statements
+  assert.ok(resDefault.comments.text.includes('PRINT AT 10, 1; PAPER 2; "HELLO"'));
+
+  // Disabled explicitly
+  const resDisabled = transpileJBasAllVersions(source, { optimizePrintAttributes: false });
+  assert.ok(!resDisabled.compact.text.includes('{PAPER 2}'));
+  assert.ok(!resDisabled.step10.text.includes('{PAPER 2}'));
+  assert.ok(resDisabled.compact.text.includes('PAPER 2'));
+});
+
 
