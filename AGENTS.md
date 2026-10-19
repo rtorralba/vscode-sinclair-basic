@@ -151,9 +151,12 @@ When you open this project in VS Code, here is what is ready to be done:
    - Never alter text inside `"double quotes"` or after `REM` comments.
 3. **Keep core pure**:
    - `src/core/renumber.js` and `src/core/jbas2bas.js` must remain pure JavaScript without VS Code API dependencies so they can be run in CLI, web, or automated test runners.
-4. **MUY IMPORTANTE: Generación de TAP siempre con la versión más óptima**:
-   - Para compilar a imagen de cinta `.tap`, se DEBE usar SIEMPRE la versión más óptima: **líneas de 1 en 1, sin comentarios y con compactación de espacios en operadores** (`dist/<filename>.bas`).
+4. **Compilación de TAP desde .jbas (siempre versión óptima)**:
+   - Para compilar a imagen de cinta `.tap` desde un fichero `.jbas`, se compilan las 3 versiones y se usa SIEMPRE la versión más óptima: **líneas de 1 en 1, sin comentarios y con compactación de espacios en operadores** (`dist/<filename>.bas`).
    - Esto minimiza drásticamente los bytes en la cinta, reduce el consumo de memoria RAM en el ZX Spectrum y agiliza la velocidad de ejecución del intérprete de Sinclair BASIC al evitar saltar sobre o procesar líneas de comentarios `REM`.
 5. **NUNCA emitir byte 13 (0x0D) dentro de cadenas literales de Sinclair BASIC**:
    - El byte `13` (`0x0D`) es el carácter de salto de línea / `ENTER` en la ROM del Sinclair ZX Spectrum.
    - Si un literal de cadena en una línea contiene el byte 13 (por ejemplo, `{AT 13, col}` o `{CODE 13}`), el analizador de la ROM cree que la línea ha terminado antes de cerrar las comillas y aborta con el error `C Nonsense in BASIC`. Por tanto, `AT 13, col` y `AT row, 13` se deben mantener siempre en sintaxis estándar de Sinclair BASIC fuera de las comillas.
+6. **Compilación directa .bas a .tap es estrictamente 1:1**:
+   - Cuando se compila directamente un fichero `.bas` a `.tap`, la conversión es **estrictamente 1:1**: se respetan con total fidelidad los números de línea originales, comentarios `REM`, variables y espacios tal cual los escribió el programador.
+   - Si el programador incluyó comodines de control de `bas2tap` dentro de cadenas (`{PAPER n}`, `{INK n}`, `{AT y, x}`, etc.), `tapGenerator` los tokeniza a sus bytes correspondientes en la cinta. Ninguna optimización intrusiva (como eliminación de comentarios o re-numeración) se aplica a un archivo `.bas`, ya que esas tareas pertenecen exclusivamente al flujo de preprocesado de `jbas2bas`.

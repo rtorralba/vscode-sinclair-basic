@@ -87,7 +87,7 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shif
 |---|---|---|---|
 | **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Generates 3 `.bas` versions in `dist/` and builds `.tap` strictly from the optimal 1x1 no-comments version (`<name>.bas`). |
 | **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Generates 3 versions in `dist/` (`<name>.bas` 1x1, `<name>-step10.bas` 10x10, `<name>-comments.bas` 10x10+REM) and opens `step10` in editor. |
-| **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` to a ZX Spectrum `.tap` tape image using native pure JS engine. |
+| **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` directly to a ZX Spectrum `.tap` 1:1 (preserving line numbers, comments, and parsing `bas2tap` wildcards). |
 | **Renumber BAS Lines (.bas)** | `sinclairBasic.renumber` / `renumberBas` | `Ctrl+Alt+R` | Renumbers lines in `.bas` (10 by 10) and updates all jump references (`GOTO`, `GOSUB`, `RESTORE`, etc.). |
 | **Run in Emulator** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured emulator (built-in Turbo80 Webview or external Fuse). |
 | **Run in Web Emulator (Turbo80)** | `sinclairBasic.runTurbo80` | — | Forces execution in the built-in Turbo80 web emulator tab. |
