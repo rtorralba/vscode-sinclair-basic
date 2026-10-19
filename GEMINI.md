@@ -1,6 +1,6 @@
 # AI Agent Context & Guidelines (AGENTS.md)
 
-Welcome! This document provides complete context for any AI agent working on the **Sinclair BASIC (Unofficial)** VS Code Extension (`vscode-sinclair-basic`).
+Welcome! This document provides complete context for any AI agent working on the **Sinclair BASIC** VS Code Extension (`vscode-sinclair-basic`).
 
 ---
 
@@ -9,7 +9,7 @@ Welcome! This document provides complete context for any AI agent working on the
 * **Origin**: This extension was extracted and modularized from the `Dino BASIC` project (a Sinclair ZX Spectrum game written in Sinclair BASIC / `.jbas`).
 * **Motivation**: Instead of having project-specific scripts (`run_fuse.ps1`, local Python/Node scripts, custom tasks), we created an official-feeling, standalone Visual Studio Code extension to give the entire Sinclair BASIC community a modern development experience (IDE).
 * **Target Audience**: Retro programmers creating software and games for the **Sinclair ZX Spectrum** family (16K, 48K, 128K, +2, +3, Next).
-* **Identity**: The extension is named **Sinclair BASIC (Unofficial)** (`sinclair-basic`) to maximize discoverability while strictly respecting trademark neutrality (clear disclaimer included).
+* **Identity**: The extension is named **Sinclair BASIC** (`sinclair-basic`) to maximize discoverability while strictly respecting trademark neutrality (clear disclaimer included).
 
 ---
 

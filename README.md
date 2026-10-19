@@ -1,4 +1,4 @@
-# Sinclair BASIC for Visual Studio Code (Unofficial)
+# Sinclair BASIC for Visual Studio Code
 
 <p align="center">
   <img src="icon.png" width="128" height="128" alt="Sinclair BASIC for Visual Studio Code">

@@ -1,5 +1,5 @@
 /**
- * Sinclair BASIC (Unofficial) - VS Code Web Extension Entry Point
+ * Sinclair BASIC - VS Code Web Extension Entry Point
  * Designed for vscode.dev, github.dev, and browser-based VS Code environments.
  */
 

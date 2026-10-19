@@ -1,5 +1,5 @@
 /**
- * Sinclair BASIC (Unofficial) - VS Code Extension Entry Point
+ * Sinclair BASIC - VS Code Extension Entry Point
  */
 
 const vscode = require('vscode');

@@ -1,7 +1,7 @@
 {
   "name": "sinclair-basic",
-  "displayName": "Sinclair BASIC (Unofficial)",
-  "description": "Unofficial Sinclair BASIC language support for Visual Studio Code. Includes syntax highlighting, renumbering, optional modern syntax (jbas), TAP builder and emulator integration.",
+  "displayName": "Sinclair BASIC",
+  "description": "Sinclair BASIC language support for Visual Studio Code. Includes syntax highlighting, renumbering, optional modern syntax (jbas), TAP builder and emulator integration.",
   "version": "1.0.0",
   "publisher": "rtorralba",
   "icon": "icon.png",
@@ -267,7 +267,7 @@
       }
     ],
     "configuration": {
-      "title": "Sinclair BASIC (Unofficial)",
+      "title": "Sinclair BASIC",
       "properties": {
         "sinclairBasic.emulatorType": {
           "type": "string",

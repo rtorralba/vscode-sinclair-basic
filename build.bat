@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableDelayedExpansion
-title Sinclair BASIC (Unofficial) - Build & Publish
+title Sinclair BASIC - Build & Publish
 
 :: Asegurar que estamos en el directorio del script
 cd /d "%~dp0"
 
 echo ===================================================================
-echo     Sinclair BASIC (Unofficial) - VS Code Extension Builder
+echo     Sinclair BASIC - VS Code Extension Builder
 echo ===================================================================
 echo.
 
