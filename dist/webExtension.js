@@ -2422,6 +2422,200 @@ Defined on line ${i + 1}`);
   }
 });
 
+// src/core/folding.js
+var require_folding = __commonJS({
+  "src/core/folding.js"(exports2, module2) {
+    function getCodeOutsideStringsAndRem(line) {
+      let result = "";
+      let inString = false;
+      let i = 0;
+      const n = line.length;
+      while (i < n) {
+        const c = line[i];
+        if (c === '"') {
+          inString = !inString;
+          result += " ";
+          i++;
+          continue;
+        }
+        if (!inString) {
+          if (line.slice(i, i + 3).toUpperCase() === "REM") {
+            const prev = i > 0 ? line[i - 1] : " ";
+            const next = i + 3 < n ? line[i + 3] : " ";
+            if (!/[a-zA-Z0-9_]/.test(prev) && !/[a-zA-Z0-9_]/.test(next)) {
+              break;
+            }
+          }
+          result += c;
+        } else {
+          result += " ";
+        }
+        i++;
+      }
+      return result;
+    }
+    function getBasFoldingRanges2(input) {
+      const lines = Array.isArray(input) ? input : input.split(/\r?\n/);
+      const lineCount = lines.length;
+      const lineNumToIndex = /* @__PURE__ */ new Map();
+      for (let i = 0; i < lineCount; i++) {
+        const m = lines[i].match(/^\s*(\d+)/);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          lineNumToIndex.set(num, i);
+        }
+      }
+      const gosubTargets = /* @__PURE__ */ new Set();
+      const gosubRegex = /\b(?:GO\s*SUB|GOSUB)\s+(\d+(?:\s*,\s*\d+)*)/gi;
+      for (let i = 0; i < lineCount; i++) {
+        const code = getCodeOutsideStringsAndRem(lines[i]);
+        let match;
+        while ((match = gosubRegex.exec(code)) !== null) {
+          const targetsStr = match[1];
+          const targets = targetsStr.split(",").map((s) => parseInt(s.trim(), 10));
+          for (const t of targets) {
+            if (!isNaN(t) && lineNumToIndex.has(t)) {
+              gosubTargets.add(t);
+            }
+          }
+        }
+      }
+      const sortedTargets = Array.from(gosubTargets).map((num) => ({ num, lineIndex: lineNumToIndex.get(num) })).sort((a, b) => a.lineIndex - b.lineIndex);
+      const ranges = [];
+      for (let t = 0; t < sortedTargets.length; t++) {
+        const current = sortedTargets[t];
+        const startLineIndex = current.lineIndex;
+        const nextSubLineIndex = t + 1 < sortedTargets.length ? sortedTargets[t + 1].lineIndex : lineCount;
+        let lastReturnLineIndex = -1;
+        for (let k = startLineIndex; k < nextSubLineIndex; k++) {
+          const lineCode = getCodeOutsideStringsAndRem(lines[k]);
+          if (/\bRETURN\b/i.test(lineCode)) {
+            lastReturnLineIndex = k;
+          }
+        }
+        if (lastReturnLineIndex > startLineIndex) {
+          ranges.push({
+            start: startLineIndex,
+            end: lastReturnLineIndex,
+            kind: "region"
+          });
+        }
+      }
+      return ranges;
+    }
+    module2.exports = {
+      getCodeOutsideStringsAndRem,
+      getBasFoldingRanges: getBasFoldingRanges2
+    };
+  }
+});
+
+// src/core/definitions.js
+var require_definitions = __commonJS({
+  "src/core/definitions.js"(exports2, module2) {
+    var { getCodeOutsideStringsAndRem } = require_folding();
+    function findBasJumpTargetAtPosition2(lineText, charIndex) {
+      if (typeof lineText !== "string" || charIndex < 0 || charIndex > lineText.length) {
+        return null;
+      }
+      const masked = getCodeOutsideStringsAndRem(lineText);
+      if (masked.length < lineText.length && charIndex >= masked.length) {
+        return null;
+      }
+      if (charIndex < lineText.length) {
+        if (lineText[charIndex] === '"' || masked[charIndex] === " " && lineText[charIndex] !== " ") {
+          return null;
+        }
+      }
+      const jumpRegex = /\b(GO\s*SUB|GOSUB|GO\s*TO|GOTO|RUN|RESTORE|LINE|THEN)\s+(\d+(?:\s*,\s*\d+)*)/gi;
+      let match;
+      while ((match = jumpRegex.exec(masked)) !== null) {
+        const fullMatch = match[0];
+        const keyword = match[1];
+        const targetsStr = match[2];
+        const targetsStart = match.index + fullMatch.length - targetsStr.length;
+        const numRegex = /\b(\d+)\b/g;
+        let numMatch;
+        while ((numMatch = numRegex.exec(targetsStr)) !== null) {
+          const numStr = numMatch[1];
+          const startCol = targetsStart + numMatch.index;
+          const endCol = startCol + numStr.length;
+          if (charIndex >= startCol && charIndex <= endCol) {
+            return {
+              targetLineNumber: parseInt(numStr, 10),
+              startCol,
+              endCol,
+              keyword
+            };
+          }
+        }
+      }
+      return null;
+    }
+    function findBasLineIndex2(documentTextOrLines, targetLineNumber) {
+      const targetNum = typeof targetLineNumber === "number" ? targetLineNumber : parseInt(targetLineNumber, 10);
+      if (isNaN(targetNum)) return null;
+      if (documentTextOrLines && typeof documentTextOrLines.lineCount === "number" && typeof documentTextOrLines.lineAt === "function") {
+        const count = documentTextOrLines.lineCount;
+        for (let i = 0; i < count; i++) {
+          const line = documentTextOrLines.lineAt(i).text;
+          const match = line.match(/^(\s*)(\d+)\b/);
+          if (match) {
+            const lineNum = parseInt(match[2], 10);
+            if (lineNum === targetNum) {
+              return {
+                lineIndex: i,
+                col: match[1].length,
+                text: line
+              };
+            }
+          }
+        }
+        return null;
+      }
+      const lines = Array.isArray(documentTextOrLines) ? documentTextOrLines : typeof documentTextOrLines === "string" ? documentTextOrLines.split(/\r?\n/) : [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const match = line.match(/^(\s*)(\d+)\b/);
+        if (match) {
+          const lineNum = parseInt(match[2], 10);
+          if (lineNum === targetNum) {
+            return {
+              lineIndex: i,
+              col: match[1].length,
+              text: line
+            };
+          }
+        }
+      }
+      return null;
+    }
+    function getBasDefinition(documentTextOrLines, lineIndex, charIndex) {
+      const lines = Array.isArray(documentTextOrLines) ? documentTextOrLines : documentTextOrLines.split(/\r?\n/);
+      if (lineIndex < 0 || lineIndex >= lines.length) return null;
+      const lineText = lines[lineIndex];
+      const jumpTarget = findBasJumpTargetAtPosition2(lineText, charIndex);
+      if (!jumpTarget) return null;
+      const targetLocation = findBasLineIndex2(lines, jumpTarget.targetLineNumber);
+      if (!targetLocation) return null;
+      return {
+        targetLineNumber: jumpTarget.targetLineNumber,
+        origin: {
+          startCol: jumpTarget.startCol,
+          endCol: jumpTarget.endCol,
+          keyword: jumpTarget.keyword
+        },
+        target: targetLocation
+      };
+    }
+    module2.exports = {
+      findBasJumpTargetAtPosition: findBasJumpTargetAtPosition2,
+      findBasLineIndex: findBasLineIndex2,
+      getBasDefinition
+    };
+  }
+});
+
 // src/webExtension.js
 var vscode = require("vscode");
 var { renumberProgram } = require_renumber();
@@ -2430,6 +2624,8 @@ var { bas2tap, tap2buffer } = require_tapGenerator();
 var { formatKeywordsToUpper } = require_formatter();
 var { createSinclairCompletionProvider } = require_completions();
 var { translateWildcardsToChr } = require_wildcards();
+var { getBasFoldingRanges } = require_folding();
+var { findBasJumpTargetAtPosition, findBasLineIndex } = require_definitions();
 function getBaseName(uri, extToRemove = "") {
   const segments = uri.path.split("/");
   const last = segments[segments.length - 1] || "program";
@@ -2994,6 +3190,31 @@ ${all.errors.join("\n")}`);
       return null;
     }
   });
+  const basDefinitionProvider = vscode.languages.registerDefinitionProvider("sinclair-basic", {
+    provideDefinition(document, position) {
+      const lineText = document.lineAt(position.line).text;
+      const jumpTarget = findBasJumpTargetAtPosition(lineText, position.character);
+      if (!jumpTarget) return null;
+      const targetLoc = findBasLineIndex(document, jumpTarget.targetLineNumber);
+      if (!targetLoc) return null;
+      const originRange = new vscode.Range(
+        position.line,
+        jumpTarget.startCol,
+        position.line,
+        jumpTarget.endCol
+      );
+      const targetPos = new vscode.Position(targetLoc.lineIndex, targetLoc.col);
+      const targetRange = new vscode.Range(targetPos, targetPos);
+      return [
+        {
+          originSelectionRange: originRange,
+          targetUri: document.uri,
+          targetRange,
+          targetSelectionRange: targetRange
+        }
+      ];
+    }
+  });
   const referenceProvider = vscode.languages.registerReferenceProvider("jbas", {
     provideReferences(document, position) {
       const range = document.getWordRangeAtPosition(position, /@[a-zA-Z0-9_]+/);
@@ -3173,6 +3394,12 @@ ${all.errors.join("\n")}`);
       }
     }
   );
+  const basFoldingProvider = vscode.languages.registerFoldingRangeProvider("sinclair-basic", {
+    provideFoldingRanges(document) {
+      const ranges = getBasFoldingRanges(document.getText());
+      return ranges.map((r) => new vscode.FoldingRange(r.start, r.end, vscode.FoldingRangeKind.Region));
+    }
+  });
   context.subscriptions.push(
     vscode.commands.registerCommand("sinclairBasic.renumber", handleRenumber),
     vscode.commands.registerCommand("sinclairBasic.renumberBas", handleRenumber),
@@ -3192,9 +3419,11 @@ ${all.errors.join("\n")}`);
     referenceProvider,
     symbolProvider,
     renameProvider,
+    basDefinitionProvider,
     completionProvider,
     documentFormattingProvider,
     rangeFormattingProvider,
+    basFoldingProvider,
     jbasDiagnostics,
     vscode.workspace.onDidOpenTextDocument(validateJBasDocument),
     vscode.workspace.onDidChangeTextDocument((e) => validateJBasDocument(e.document)),

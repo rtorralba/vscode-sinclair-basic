@@ -2,7 +2,7 @@
   "name": "sinclair-basic",
   "displayName": "Sinclair BASIC",
   "description": "Sinclair BASIC language support for Visual Studio Code. Includes syntax highlighting, renumbering, optional modern syntax (jbas), TAP builder and emulator integration.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "rtorralba",
   "icon": "icon.png",
   "engines": {

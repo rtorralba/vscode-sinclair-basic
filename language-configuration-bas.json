@@ -31,11 +31,5 @@
       "\"",
       "\""
     ]
-  ],
-  "folding": {
-    "markers": {
-      "start": "^\\s*\\d+\\s+(FOR|GO\\s*SUB|GOSUB)",
-      "end": "^\\s*\\d+\\s+(NEXT|RETURN)"
-    }
-  }
+  ]
 }

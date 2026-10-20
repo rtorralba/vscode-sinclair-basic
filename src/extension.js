@@ -13,6 +13,8 @@ const { generateTapFile } = require('./core/tapGenerator');
 const { formatKeywordsToUpper } = require('./core/formatter');
 const { createSinclairCompletionProvider } = require('./core/completions');
 const { translateWildcardsToChr } = require('./core/wildcards');
+const { getBasFoldingRanges } = require('./core/folding');
+const { findBasJumpTargetAtPosition, findBasLineIndex } = require('./core/definitions');
 
 /**
  * Resolves the target document from an optional command URI parameter or active text editor.
@@ -734,6 +736,36 @@ function activate(context) {
     }
   });
 
+  // Definition Provider for Sinclair BASIC (.bas): Ctrl+Click on jump line number (e.g. GO SUB 500, GO TO 100)
+  const basDefinitionProvider = vscode.languages.registerDefinitionProvider('sinclair-basic', {
+    provideDefinition(document, position) {
+      const lineText = document.lineAt(position.line).text;
+      const jumpTarget = findBasJumpTargetAtPosition(lineText, position.character);
+      if (!jumpTarget) return null;
+
+      const targetLoc = findBasLineIndex(document, jumpTarget.targetLineNumber);
+      if (!targetLoc) return null;
+
+      const originRange = new vscode.Range(
+        position.line,
+        jumpTarget.startCol,
+        position.line,
+        jumpTarget.endCol
+      );
+      const targetPos = new vscode.Position(targetLoc.lineIndex, targetLoc.col);
+      const targetRange = new vscode.Range(targetPos, targetPos);
+
+      return [
+        {
+          originSelectionRange: originRange,
+          targetUri: document.uri,
+          targetRange: targetRange,
+          targetSelectionRange: targetRange
+        }
+      ];
+    }
+  });
+
   // Reference Provider: Find all references of @label in .jbas (Shift+F12)
   const referenceProvider = vscode.languages.registerReferenceProvider('jbas', {
     provideReferences(document, position) {
@@ -998,6 +1030,14 @@ function activate(context) {
     }
   );
 
+  // Subroutine Folding Range Provider for Sinclair BASIC (.bas functions called via GO SUB)
+  const basFoldingProvider = vscode.languages.registerFoldingRangeProvider('sinclair-basic', {
+    provideFoldingRanges(document) {
+      const ranges = getBasFoldingRanges(document.getText());
+      return ranges.map(r => new vscode.FoldingRange(r.start, r.end, vscode.FoldingRangeKind.Region));
+    }
+  });
+
   // Register commands and language providers
   context.subscriptions.push(
     // Renumber commands (sinclairBasic.renumber & sinclairBasic.renumberBas)
@@ -1036,10 +1076,12 @@ function activate(context) {
     symbolProvider,
     renameProvider,
 
-    // Autocompletion & formatting providers
+    // Autocompletion, formatting & folding providers
     completionProvider,
     documentFormattingProvider,
     rangeFormattingProvider,
+    basFoldingProvider,
+    basDefinitionProvider,
 
     // Diagnostics for duplicate labels
     jbasDiagnostics,

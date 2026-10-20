@@ -88,7 +88,18 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
   * Multi-target computed jumps: `ON x GO TO 10, 20, 30`
 * **Zero false positives**: Strings (`PRINT "GOTO 10"`) and `REM` comments are completely untouched.
 
-### 5. Integrated Toolchain & Emulation
+### 5. Subroutine Code Folding (`.bas`)
+* **Semantic Subroutine Folding**: Detects function calls using `GO SUB <line>` or `GOSUB <line>` (as well as computed multi-targets like `ON x GOSUB 100, 200`).
+* Folds the subroutine body starting at its target definition line and ending at its corresponding `RETURN` statement.
+* Fully protects against false positives in string literals and `REM` comments.
+* Notice: `.jbas` files use modular `@labels` without line numbers and preserve their own standard structural folding.
+
+### 6. Jump Target Navigation / Go to Definition (`Ctrl+Click` / `F12`)
+* **Interactive Navigation in `.bas`**: Hold `Ctrl` (or `Cmd` on macOS) and click on any target line number following `GO SUB`, `GOSUB`, `GO TO`, `GOTO`, `RUN`, `RESTORE`, or computed jumps (`ON x GO SUB 100, 200`) to jump directly to that line definition in the code.
+* **Interactive Navigation in `.jbas`**: Ctrl+Click on `@label` jumps directly to `@label:`.
+* **Zero False Positives**: Does not trigger on coordinates (`PRINT AT 10, 20`), variable assignments, string literals (`"GO SUB 500"`), or comments (`REM GO SUB 500`).
+
+### 7. Integrated Toolchain & Emulation
 * **Built-in Pure JavaScript TAP Generator**: Blazing fast, zero external dependencies (no `bas2tap` executable required). Automatically encodes Sinclair BASIC keywords, Spectrum floating-point numbers, UDGs, and headers with autostart line. Full byte-for-byte parity with `bas2tap` whitespace rules, avoiding unwanted double spaces when programs are listed by the ZX Spectrum ROM (e.g., `LET py=0`, `CHR$ 18`). An optional fallback to external `bas2tap` is available via settings.
 * **Built-in Web Emulator (Turbo80)**: Instant execution inside a VS Code tab with zero external installs. Features authentic audio, CRT shader effects, 48K/128K model selection, and on-screen keyboard support.
 * **External Desktop Emulator Support**: One-click build and launch in external emulators (e.g. Fuse, CSpect, Retro Virtual Machine) if preferred.
