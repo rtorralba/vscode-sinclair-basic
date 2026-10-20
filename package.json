@@ -2,7 +2,7 @@
   "name": "sinclair-basic",
   "displayName": "Sinclair BASIC",
   "description": "Sinclair BASIC language support for Visual Studio Code. Includes syntax highlighting, renumbering, optional modern syntax (jbas), TAP builder and emulator integration.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "rtorralba",
   "icon": "icon.png",
   "engines": {
@@ -155,6 +155,12 @@
         "title": "Format Keywords to Uppercase",
         "category": "Sinclair BASIC",
         "icon": "$(case-sensitive)"
+      },
+      {
+        "command": "sinclairBasic.shareTurbo80",
+        "title": "Share on Turbo80.com (Get Web Link)",
+        "category": "Sinclair BASIC",
+        "icon": "$(broadcast)"
       }
     ],
     "menus": {
@@ -183,6 +189,11 @@
           "command": "sinclairBasic.runEmulator",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "navigation@3"
+        },
+        {
+          "command": "sinclairBasic.shareTurbo80",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "navigation@4"
         }
       ],
       "editor/context": [
@@ -215,6 +226,11 @@
           "command": "sinclairBasic.runEmulator",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "2_build@2"
+        },
+        {
+          "command": "sinclairBasic.shareTurbo80",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "2_build@3"
         }
       ],
       "explorer/context": [
@@ -247,6 +263,11 @@
           "command": "sinclairBasic.runEmulator",
           "when": "resourceExtname == .bas || resourceExtname == .jbas",
           "group": "sinclair@4"
+        },
+        {
+          "command": "sinclairBasic.shareTurbo80",
+          "when": "resourceExtname == .bas || resourceExtname == .jbas || resourceExtname == .tap",
+          "group": "sinclair@5"
         }
       ]
     },

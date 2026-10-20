@@ -2616,6 +2616,55 @@ var require_definitions = __commonJS({
   }
 });
 
+// src/core/share.js
+var require_share = __commonJS({
+  "src/core/share.js"(exports2, module2) {
+    async function uploadTapToHost2(tapBytes, filename = "program.tap", fetchFn = fetch) {
+      if (!tapBytes || tapBytes.length === 0) {
+        throw new Error("El archivo TAP est\xE1 vac\xEDo o no se gener\xF3 correctamente.");
+      }
+      const safeFilename = filename.toLowerCase().endsWith(".tap") ? filename : `${filename}.tap`;
+      const form = new FormData();
+      form.append("reqtype", "fileupload");
+      const file = new File([tapBytes], safeFilename, {
+        type: "application/octet-stream"
+      });
+      form.append("fileToUpload", file);
+      const res = await fetchFn("https://catbox.moe/user/api.php", {
+        method: "POST",
+        body: form,
+        headers: {
+          "User-Agent": "VSCode-Sinclair-BASIC/1.0.1"
+        }
+      });
+      if (!res.ok) {
+        throw new Error(`Error en el servidor de alojamiento (${res.status} ${res.statusText})`);
+      }
+      const rawUrl = (await res.text()).trim();
+      if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
+        throw new Error(`Respuesta inesperada al alojar la cinta: ${rawUrl}`);
+      }
+      return rawUrl;
+    }
+    function buildTurbo80ShareUrl2(tapPublicUrl, options = {}) {
+      if (!tapPublicUrl) {
+        throw new Error("Se requiere la URL p\xFAblica del archivo TAP.");
+      }
+      const model = options.model || "48k";
+      const encodedUrl = encodeURIComponent(tapPublicUrl.trim());
+      let shareUrl = `https://turbo80.com/?load=${encodedUrl}&model=${model}`;
+      if (options.crt === false) {
+        shareUrl += "&crt=0";
+      }
+      return shareUrl;
+    }
+    module2.exports = {
+      uploadTapToHost: uploadTapToHost2,
+      buildTurbo80ShareUrl: buildTurbo80ShareUrl2
+    };
+  }
+});
+
 // src/webExtension.js
 var vscode = require("vscode");
 var { renumberProgram } = require_renumber();
@@ -2626,6 +2675,7 @@ var { createSinclairCompletionProvider } = require_completions();
 var { translateWildcardsToChr } = require_wildcards();
 var { getBasFoldingRanges } = require_folding();
 var { findBasJumpTargetAtPosition, findBasLineIndex } = require_definitions();
+var { uploadTapToHost, buildTurbo80ShareUrl } = require_share();
 function getBaseName(uri, extToRemove = "") {
   const segments = uri.path.split("/");
   const last = segments[segments.length - 1] || "program";
@@ -3120,6 +3170,56 @@ ${all.errors.join("\n")}`);
   async function handleRunExternalEmulator() {
     vscode.window.showInformationMessage("External desktop emulators (e.g. Fuse) require VS Code Desktop. In VS Code Web, the built-in Turbo80 web emulator is used.");
   }
+  async function handleShareTurbo80(uri) {
+    let tapBytes = null;
+    let filename = "";
+    if (uri && uri.path && uri.path.toLowerCase().endsWith(".tap")) {
+      try {
+        tapBytes = await vscode.workspace.fs.readFile(uri);
+        filename = getBaseName(uri);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Error al leer archivo TAP: ${err.message}`);
+        return;
+      }
+    } else {
+      const result = await handleCompileBas(uri);
+      if (!result) return;
+      tapBytes = result.tapBytes;
+      filename = result.filename;
+    }
+    try {
+      const config = vscode.workspace.getConfiguration("sinclairBasic");
+      const model = config.get("turbo80Model", "48k") || "48k";
+      const crt = config.get("turbo80Crt", true);
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Compartiendo ${filename} en Turbo80.com...`,
+          cancellable: false
+        },
+        async (progress) => {
+          progress.report({ message: "Subiendo archivo .tap..." });
+          const publicTapUrl = await uploadTapToHost(tapBytes, filename);
+          progress.report({ message: "Generando enlace web de Turbo80..." });
+          const shareUrl = buildTurbo80ShareUrl(publicTapUrl, { model, crt });
+          await vscode.env.clipboard.writeText(shareUrl);
+          const choice = await vscode.window.showInformationMessage(
+            `\xA1Cinta compartida! Enlace de Turbo80 copiado al portapapeles:
+${shareUrl}`,
+            "Abrir en el Navegador",
+            "Copiar Enlace"
+          );
+          if (choice === "Abrir en el Navegador") {
+            await vscode.env.openExternal(vscode.Uri.parse(shareUrl));
+          } else if (choice === "Copiar Enlace") {
+            await vscode.env.clipboard.writeText(shareUrl);
+          }
+        }
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(`Error al compartir en Turbo80: ${err.message}`);
+    }
+  }
   const jbasLanguageConfig = vscode.languages.setLanguageConfiguration("jbas", {
     onEnterRules: [
       {
@@ -3412,6 +3512,7 @@ ${all.errors.join("\n")}`);
     vscode.commands.registerCommand("sinclairBasic.runEmulator", handleRunEmulator),
     vscode.commands.registerCommand("sinclairBasic.runTurbo80", handleRunTurbo80),
     vscode.commands.registerCommand("sinclairBasic.runExternalEmulator", handleRunExternalEmulator),
+    vscode.commands.registerCommand("sinclairBasic.shareTurbo80", handleShareTurbo80),
     vscode.commands.registerCommand("sinclairBasic.selectBas2tap", () => vscode.window.showInformationMessage("Executable path selection is only available on desktop.")),
     vscode.commands.registerCommand("sinclairBasic.selectEmulator", () => vscode.window.showInformationMessage("Executable path selection is only available on desktop.")),
     jbasLanguageConfig,

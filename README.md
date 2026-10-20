@@ -99,9 +99,10 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
 * **Interactive Navigation in `.jbas`**: Ctrl+Click on `@label` jumps directly to `@label:`.
 * **Zero False Positives**: Does not trigger on coordinates (`PRINT AT 10, 20`), variable assignments, string literals (`"GO SUB 500"`), or comments (`REM GO SUB 500`).
 
-### 7. Integrated Toolchain & Emulation
+### 7. Integrated Toolchain, Emulation & Instant Sharing
 * **Built-in Pure JavaScript TAP Generator**: Blazing fast, zero external dependencies (no `bas2tap` executable required). Automatically encodes Sinclair BASIC keywords, Spectrum floating-point numbers, UDGs, and headers with autostart line. Full byte-for-byte parity with `bas2tap` whitespace rules, avoiding unwanted double spaces when programs are listed by the ZX Spectrum ROM (e.g., `LET py=0`, `CHR$ 18`). An optional fallback to external `bas2tap` is available via settings.
 * **Built-in Web Emulator (Turbo80)**: Instant execution inside a VS Code tab with zero external installs. Features authentic audio, CRT shader effects, 48K/128K model selection, and on-screen keyboard support.
+* **Instant Web Sharing via Turbo80.com**: Generate a public, shareable link with one click (`Sinclair BASIC: Share on Turbo80.com`). Compiles your `.bas` or `.jbas` to `.tap` (or takes any existing `.tap`), uploads it, copies the `https://turbo80.com/?load=...` link directly to your clipboard, and lets your friends and colleagues test your game immediately in any browser with zero setup.
 * **External Desktop Emulator Support**: One-click build and launch in external emulators (e.g. Fuse, CSpect, Retro Virtual Machine) if preferred.
 
 ---
@@ -115,6 +116,7 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shif
 | **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Generates `.bas` versions in `dist/` (including `<name>.sinclair.bas` translating `bas2tap` wildcards to standard `CHR$`) and builds `.tap` from the optimal 1x1 version. |
 | **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Generates 4 versions in `dist/` (`<name>.bas` 1x1, `<name>-step10.bas`, `<name>-comments.bas`, and `<name>.sinclair.bas` with standard `CHR$`) and opens `step10` in editor. |
 | **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` directly to `.tap` and generates `dist/<name>.sinclair.bas` translating `bas2tap` wildcards to standard `CHR$`. |
+| **Share on Turbo80.com** | `sinclairBasic.shareTurbo80` | — | Compiles/locates `.tap`, uploads it, and copies a ready-to-play `https://turbo80.com/?load=...` link to clipboard. |
 | **Format Keywords to Uppercase** | `sinclairBasic.formatKeywords` | `Shift+Alt+F` | Formats document or selection converting all Sinclair BASIC keywords to uppercase (preserving strings and comments). |
 | **Renumber BAS Lines (.bas)** | `sinclairBasic.renumber` / `renumberBas` | `Ctrl+Alt+R` | Renumbers lines in `.bas` (10 by 10) and updates all jump references (`GOTO`, `GOSUB`, `RESTORE`, etc.). |
 | **Run in Emulator** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured emulator (built-in Turbo80 Webview or external Fuse). |

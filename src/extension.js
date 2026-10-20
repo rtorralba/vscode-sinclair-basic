@@ -15,6 +15,7 @@ const { createSinclairCompletionProvider } = require('./core/completions');
 const { translateWildcardsToChr } = require('./core/wildcards');
 const { getBasFoldingRanges } = require('./core/folding');
 const { findBasJumpTargetAtPosition, findBasLineIndex } = require('./core/definitions');
+const { uploadTapToHost, buildTurbo80ShareUrl } = require('./core/share');
 
 /**
  * Resolves the target document from an optional command URI parameter or active text editor.
@@ -648,6 +649,76 @@ function activate(context) {
     launchExternalEmulator(tapPath);
   }
 
+  // Command: Share on Turbo80.com (compiles/locates TAP, uploads, and generates shareable link)
+  async function handleShareTurbo80(uri) {
+    let tapPath = null;
+    let filename = '';
+
+    // Check if clicked directly on a .tap file in Explorer
+    if (uri && uri.fsPath && uri.fsPath.toLowerCase().endsWith('.tap') && fs.existsSync(uri.fsPath)) {
+      tapPath = uri.fsPath;
+      filename = path.basename(tapPath);
+    } else {
+      // Otherwise compile active or selected .bas / .jbas document
+      const doc = await getTargetDocument(uri);
+      if (!doc) {
+        vscode.window.showInformationMessage('No active editor or Sinclair BASIC file selected.');
+        return;
+      }
+
+      const filePath = doc.fileName;
+      if (filePath.endsWith('.jbas')) {
+        tapPath = await handleCompileJBas(uri);
+      } else if (filePath.endsWith('.bas')) {
+        tapPath = await handleCompileBas(uri);
+      } else {
+        vscode.window.showWarningMessage('Please select a .bas, .jbas, or .tap file to share.');
+        return;
+      }
+
+      if (!tapPath) return;
+      filename = path.basename(tapPath);
+    }
+
+    try {
+      const tapBytes = fs.readFileSync(tapPath);
+      const config = vscode.workspace.getConfiguration('sinclairBasic');
+      const model = config.get('turbo80Model', '48k') || '48k';
+      const crt = config.get('turbo80Crt', true);
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Compartiendo ${filename} en Turbo80.com...`,
+          cancellable: false
+        },
+        async (progress) => {
+          progress.report({ message: 'Subiendo archivo .tap...' });
+          const publicTapUrl = await uploadTapToHost(tapBytes, filename);
+
+          progress.report({ message: 'Generando enlace web de Turbo80...' });
+          const shareUrl = buildTurbo80ShareUrl(publicTapUrl, { model, crt });
+
+          await vscode.env.clipboard.writeText(shareUrl);
+
+          const choice = await vscode.window.showInformationMessage(
+            `¡Cinta compartida! Enlace de Turbo80 copiado al portapapeles:\n${shareUrl}`,
+            'Abrir en el Navegador',
+            'Copiar Enlace'
+          );
+
+          if (choice === 'Abrir en el Navegador') {
+            await vscode.env.openExternal(vscode.Uri.parse(shareUrl));
+          } else if (choice === 'Copiar Enlace') {
+            await vscode.env.clipboard.writeText(shareUrl);
+          }
+        }
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(`Error al compartir en Turbo80: ${err.message}`);
+    }
+  }
+
   // Command: Browse and select bas2tap executable
   async function handleSelectBas2tap() {
     const config = vscode.workspace.getConfiguration('sinclairBasic');
@@ -1058,10 +1129,11 @@ function activate(context) {
     vscode.commands.registerCommand('sinclairBasic.compileBas', handleCompileBas),
     vscode.commands.registerCommand('sinclairBasic.buildTap', handleCompileBas),
 
-    // Run in Emulator
+    // Run in Emulator & Share
     vscode.commands.registerCommand('sinclairBasic.runEmulator', handleRunEmulator),
     vscode.commands.registerCommand('sinclairBasic.runTurbo80', handleRunTurbo80),
     vscode.commands.registerCommand('sinclairBasic.runExternalEmulator', handleRunExternalEmulator),
+    vscode.commands.registerCommand('sinclairBasic.shareTurbo80', handleShareTurbo80),
 
     // Select Executables (Browse dialogs for Settings UI)
     vscode.commands.registerCommand('sinclairBasic.selectBas2tap', handleSelectBas2tap),

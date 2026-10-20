@@ -60,6 +60,7 @@ vscode-sinclair-basic/
 |       |-- wildcards.js                 # Core engine: Translates bas2tap wildcards to standard Sinclair BASIC CHR$
 |       |-- folding.js                   # Core engine: Subroutine folding range provider for standard .bas (GO SUB -> RETURN)
 |       |-- definitions.js               # Core engine: Jump target detector & Go to Definition (Ctrl+Click) for standard .bas
+|       |-- share.js                     # Core engine: TAP upload & Turbo80.com shareable web link generator
 |       |-- keywords.js                  # Core metadata: Sinclair BASIC keyword definitions, docs & snippets
 |       |-- formatter.js                 # Core engine: Uppercase keyword formatter with string & comment protection
 |       +-- completions.js               # Autocompletion provider logic for Sinclair BASIC & JBAS
@@ -74,6 +75,7 @@ vscode-sinclair-basic/
 |   |-- wildcards.test.js                # Unit tests for wildcard to CHR$ translator
 |   |-- folding.test.js                  # Unit tests for .bas subroutine folding range provider
 |   |-- definitions.test.js              # Unit tests for .bas jump target Go to Definition provider
+|   |-- share.test.js                    # Unit tests for Turbo80 share engine
 |   |-- formatter.test.js                # Unit tests for uppercase keyword formatter
 |   +-- completions.test.js              # Unit tests for autocompletion provider
 |-- AGENTS.md                            # Complete AI instructions (this file)
@@ -129,12 +131,13 @@ vscode-sinclair-basic/
    - `sinclairBasic.runEmulator`: Construye el TAP óptimo y lanza el emulador Turbo80 con foco automático (`Ctrl+F5`).
    - `sinclairBasic.runTurbo80`: Lanza explícitamente el Webview de Turbo80 con foco automático.
    - `sinclairBasic.runExternalEmulator`: Lanza explícitamente el emulador de escritorio configurado (ej. Fuse).
+   - `sinclairBasic.shareTurbo80`: Compila `.bas` o `.jbas` a `.tap` (o usa cualquier `.tap` existente), lo aloja automáticamente en Catbox y genera un enlace listo para jugar en `https://turbo80.com/?load=...` copiado al portapapeles.
    - `basFoldingProvider`: Provider semántico de plegado (`FoldingRangeProvider`) exclusivo para Sinclair BASIC estándar (`.bas`). Detecta llamadas `GO SUB <line>` / `GOSUB <line>` (incluyendo dianas múltiples como `ON x GOSUB 100, 200`) y pliega el cuerpo de la subrutina desde la línea de definición hasta su sentencia `RETURN`, protegiendo cadenas y comentarios `REM`. No interfiere en absoluto con `.jbas`.
    - `basDefinitionProvider`: Provider de navegación Go to Definition (`DefinitionProvider`) exclusivo para Sinclair BASIC estándar (`.bas`). Permite hacer `Ctrl+Click` (o pulsar `F12`) en el número de línea tras un salto (`GO SUB`, `GOSUB`, `GO TO`, `GOTO`, `RUN`, `RESTORE`, o saltos múltiples `ON x GO SUB 100, 200`) para saltar de inmediato a la definición de esa línea en el código.
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 65 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 71 passing tests.
 
 ---
 
