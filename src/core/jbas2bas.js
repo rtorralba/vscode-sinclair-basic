@@ -24,6 +24,8 @@ try {
   path = null;
 }
 
+const { translateWildcardsToChr } = require('./wildcards');
+
 /**
  * Strips single quote comments ('...) from a line while respecting string literals.
  * @param {string} line 
@@ -692,6 +694,11 @@ function transpileJBasAllVersions(sourceText, options = {}) {
     optimizePrintAttributes: false
   });
 
+  const sinclair = {
+    ...step10,
+    text: translateWildcardsToChr(step10.text)
+  };
+
   const errors = [...new Set([...compact.errors, ...step10.errors, ...comments.errors])];
   const success = compact.success && step10.success && comments.success;
 
@@ -699,6 +706,7 @@ function transpileJBasAllVersions(sourceText, options = {}) {
     compact,
     step10,
     comments,
+    sinclair,
     success,
     errors
   };
@@ -713,7 +721,8 @@ module.exports = {
   optimizeAttributesAndStrings,
   compileJBas,
   compileJBasFile,
-  transpileJBasAllVersions
+  transpileJBasAllVersions,
+  translateWildcardsToChr
 };
 
 if (require.main === module) {

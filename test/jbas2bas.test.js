@@ -171,6 +171,13 @@ GO TO @start
   assert.equal(commentsLines[2], '30 PRINT AT 10,10; "SCORE: "; score: REM Show score');
   assert.equal(commentsLines[3], '40 LET a=1 : LET b=2 : LET c=3');
   assert.equal(commentsLines[4], '50 GO TO 20');
+
+  // Sinclair: 10 by 10, without comments, with bas2tap wildcards translated to standard CHR$
+  const sinclairLines = all.sinclair.text.trim().split(/\r?\n/);
+  assert.equal(sinclairLines[0], '10 BORDER 0: INK 7: PAPER 0: CLS');
+  assert.equal(sinclairLines[1], '20 PRINT CHR$ 22 + CHR$ 10 + CHR$ 10 + "SCORE: "; score');
+  assert.equal(sinclairLines[2], '30 LET a=1 : LET b=2 : LET c=3');
+  assert.equal(sinclairLines[3], '40 GO TO 10');
 });
 
 test('optimizeAttributesAndStrings folds constant CHR$ chains and optimizes PRINT attributes', () => {

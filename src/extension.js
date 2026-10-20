@@ -12,6 +12,7 @@ const { compileJBas, transpileJBasAllVersions } = require('./core/jbas2bas');
 const { generateTapFile } = require('./core/tapGenerator');
 const { formatKeywordsToUpper } = require('./core/formatter');
 const { createSinclairCompletionProvider } = require('./core/completions');
+const { translateWildcardsToChr } = require('./core/wildcards');
 
 /**
  * Resolves the target document from an optional command URI parameter or active text editor.
@@ -50,6 +51,14 @@ async function buildTapFromBas(basPath, distDir) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
   const tapPath = path.join(outputDir, `${baseName}.tap`);
+
+  // Always generate <baseName>.sinclair.bas translating bas2tap wildcards to standard Sinclair BASIC CHR$
+  if (!baseName.endsWith('.sinclair')) {
+    const basicContent = fs.readFileSync(basPath, 'utf-8');
+    const sinclairContent = translateWildcardsToChr(basicContent);
+    const sinclairPath = path.join(outputDir, `${baseName}.sinclair.bas`);
+    fs.writeFileSync(sinclairPath, sinclairContent, 'utf-8');
+  }
 
   let autoStartLine = configuredAutoStart;
   if (autoStartLine <= 0) {
@@ -186,21 +195,23 @@ function activate(context) {
     const compactPath = path.join(distDir, `${baseName}.bas`);
     const step10Path = path.join(distDir, `${baseName}-step10.bas`);
     const commentsPath = path.join(distDir, `${baseName}-comments.bas`);
+    const sinclairPath = path.join(distDir, `${baseName}.sinclair.bas`);
 
     fs.writeFileSync(compactPath, all.compact.text, 'utf-8');
     fs.writeFileSync(step10Path, all.step10.text, 'utf-8');
     fs.writeFileSync(commentsPath, all.comments.text, 'utf-8');
+    fs.writeFileSync(sinclairPath, all.sinclair.text, 'utf-8');
 
     const openDoc = await vscode.workspace.openTextDocument(step10Path);
     await vscode.window.showTextDocument(openDoc, { preview: false });
 
     vscode.window.showInformationMessage(
-      `Transpiled 3 versions to dist/: ${baseName}.bas (1x1 optimal), ${baseName}-step10.bas (10x10), ${baseName}-comments.bas (10x10 + REM)`
+      `Transpiled versions to dist/: ${baseName}.bas (1x1), ${baseName}-step10.bas, ${baseName}-comments.bas, ${baseName}.sinclair.bas (standard CHR$)`
     );
     return step10Path;
   }
 
-  // Command: Compile JBAS to TAP (generates all 3 versions, builds .tap strictly from optimal 1x1 no-comments version)
+  // Command: Compile JBAS to TAP (generates all versions, builds .tap strictly from optimal 1x1 no-comments version)
   async function handleCompileJBas(uri) {
     const doc = await getTargetDocument(uri);
     if (!doc) {
@@ -239,17 +250,19 @@ function activate(context) {
     const compactPath = path.join(distDir, `${baseName}.bas`);
     const step10Path = path.join(distDir, `${baseName}-step10.bas`);
     const commentsPath = path.join(distDir, `${baseName}-comments.bas`);
+    const sinclairPath = path.join(distDir, `${baseName}.sinclair.bas`);
 
-    // Write all 3 versions so dist is always complete and synchronized
+    // Write all versions so dist is always complete and synchronized
     fs.writeFileSync(compactPath, all.compact.text, 'utf-8');
     fs.writeFileSync(step10Path, all.step10.text, 'utf-8');
     fs.writeFileSync(commentsPath, all.comments.text, 'utf-8');
+    fs.writeFileSync(sinclairPath, all.sinclair.text, 'utf-8');
 
     // Build .tap strictly from the most optimal version: lines 1 by 1 and without comments (compactPath)
     try {
       const { tapPath, autoStartLine } = await buildTapFromBas(compactPath, distDir);
       vscode.window.showInformationMessage(
-        `Compiled ${baseName}.jbas → dist/${baseName}.tap (using optimal 1x1 no-comments version) & updated all 3 .bas versions (Autostart line ${autoStartLine})`
+        `Compiled ${baseName}.jbas → dist/${baseName}.tap (using optimal 1x1 no-comments version) & generated ${baseName}.sinclair.bas (Autostart line ${autoStartLine})`
       );
       return tapPath;
     } catch (err) {

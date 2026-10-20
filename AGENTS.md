@@ -57,6 +57,7 @@ vscode-sinclair-basic/
 |       |-- renumber.js                  # Core engine: Sinclair BASIC line renumbering & jump target updates
 |       |-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
 |       |-- tapGenerator.js              # Core engine: Native Pure JS ZX Spectrum .tap generator
+|       |-- wildcards.js                 # Core engine: Translates bas2tap wildcards to standard Sinclair BASIC CHR$
 |       |-- keywords.js                  # Core metadata: Sinclair BASIC keyword definitions, docs & snippets
 |       |-- formatter.js                 # Core engine: Uppercase keyword formatter with string & comment protection
 |       +-- completions.js               # Autocompletion provider logic for Sinclair BASIC & JBAS
@@ -68,6 +69,7 @@ vscode-sinclair-basic/
 |   |-- renumber.test.js                 # Unit tests for renumbering engine
 |   |-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
 |   |-- tapGenerator.test.js             # Unit tests for pure JS tap generator
+|   |-- wildcards.test.js                # Unit tests for wildcard to CHR$ translator
 |   |-- formatter.test.js                # Unit tests for uppercase keyword formatter
 |   +-- completions.test.js              # Unit tests for autocompletion provider
 |-- AGENTS.md                            # Complete AI instructions (this file)
@@ -110,13 +112,15 @@ vscode-sinclair-basic/
    - Allows falling back to external desktop emulators (Fuse, etc.) if configured.
 
 5. **VS Code Extension Integration (`src/extension.js` & `src/webExtension.js`)**:
-   - `sinclairBasic.compileJBas`: Transpila `.jbas` generando las 3 versiones en `dist/` y compila **exclusivamente la versión óptima (1 en 1 sin comentarios y compactada: `dist/<filename>.bas`)** en `dist/<filename>.tap` (`Ctrl+Shift+B`).
-   - `sinclairBasic.transpileJBas`: Transpila `.jbas` generando las 3 versiones en `dist/`:
+   - `sinclairBasic.compileJBas`: Transpila `.jbas` generando las versiones en `dist/` (incluyendo `dist/<filename>.sinclair.bas` con wildcards traducidos a `CHR$`) y compila **exclusivamente la versión óptima (1 en 1 sin comentarios y compactada: `dist/<filename>.bas`)** en `dist/<filename>.tap` (`Ctrl+Shift+B`).
+   - `sinclairBasic.transpileJBas`: Transpila `.jbas` generando 4 versiones en `dist/`:
      1. `dist/<filename>.bas`: Líneas 1 a 1, sin comentarios y con espacios de operadores compactados (máxima optimización para cinta y RAM del Spectrum).
      2. `dist/<filename>-step10.bas`: Líneas de 10 en 10, sin comentarios (versión estándar para desarrollo y lectura).
      3. `dist/<filename>-comments.bas`: Líneas de 10 en 10, con comentarios convertidos a `REM` (versión documentada).
+     4. `dist/<filename>.sinclair.bas`: Líneas de 10 en 10, con todos los wildcards de `bas2tap` (`{PAPER n}`, `{AT y, x}`, etc.) traducidos a llamadas estándar `CHR$` de Sinclair BASIC.
      Abre `dist/<filename>-step10.bas` en el editor sin generar TAP (`Ctrl+Shift+T`).
-   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compila `.bas` a `dist/<filename>.tap` nativamente (`Ctrl+Shift+B`).
+   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compila `.bas` a `dist/<filename>.tap` nativamente y genera `dist/<filename>.sinclair.bas` (`Ctrl+Shift+B`).
+   - `sinclairBasic.formatKeywords`: Formatea el documento o la selección activa convirtiendo todas las palabras clave de Sinclair BASIC a MAYÚSCULAS (`Shift+Alt+F`).
    - `sinclairBasic.renumber` / `sinclairBasic.renumberBas`: Renumbra líneas directamente en el editor activo con actualización de saltos y soporte de undo/redo (`Ctrl+Alt+R`).
    - `sinclairBasic.runEmulator`: Construye el TAP óptimo y lanza el emulador Turbo80 con foco automático (`Ctrl+F5`).
    - `sinclairBasic.runTurbo80`: Lanza explícitamente el Webview de Turbo80 con foco automático.
@@ -124,7 +128,7 @@ vscode-sinclair-basic/
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 46 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 53 passing tests.
 
 ---
 

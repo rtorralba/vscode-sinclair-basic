@@ -9,6 +9,7 @@ const { compileJBas, transpileJBasAllVersions } = require('./core/jbas2bas');
 const { bas2tap, tap2buffer } = require('./core/tapGenerator');
 const { formatKeywordsToUpper } = require('./core/formatter');
 const { createSinclairCompletionProvider } = require('./core/completions');
+const { translateWildcardsToChr } = require('./core/wildcards');
 
 /**
  * Returns the basename of a Uri, optionally stripping an extension.
@@ -97,16 +98,23 @@ async function buildTapFromDocument(doc) {
     const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
     const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
     const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
+    const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
 
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
     await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
     await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+    await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(all.sinclair.text));
 
     // ALWAYS use the most optimal version (lines 1 by 1, without comments) for TAP generation
     basicCode = all.compact.text;
   } else {
     baseName = getBaseName(doc.uri, '.bas');
+    if (!baseName.endsWith('.sinclair')) {
+      const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
+      const encoder = new TextEncoder();
+      await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(translateWildcardsToChr(basicCode)));
+    }
   }
 
   let autoStartLine = configuredAutoStart;
@@ -515,17 +523,19 @@ function activate(context) {
     const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
     const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
     const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
+    const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
 
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
     await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
     await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+    await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(all.sinclair.text));
 
     const openedDoc = await vscode.workspace.openTextDocument(step10Uri);
     await vscode.window.showTextDocument(openedDoc);
 
     vscode.window.showInformationMessage(
-      `Transpiled 3 versions to dist/: ${baseName}.bas (1x1 optimal), ${baseName}-step10.bas (10x10), ${baseName}-comments.bas (10x10 + REM)`
+      `Transpiled versions to dist/: ${baseName}.bas (1x1), ${baseName}-step10.bas, ${baseName}-comments.bas, ${baseName}.sinclair.bas (standard CHR$)`
     );
   }
 

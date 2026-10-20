@@ -270,6 +270,191 @@ Options:
   }
 });
 
+// src/core/wildcards.js
+var require_wildcards = __commonJS({
+  "src/core/wildcards.js"(exports2, module2) {
+    function translateStringLiteralToChr(strContent) {
+      const parts = [];
+      let currentText = "";
+      let i = 0;
+      const n = strContent.length;
+      let hasWildcards = false;
+      while (i < n) {
+        if (strContent[i] === "{") {
+          const closeIdx = strContent.indexOf("}", i + 1);
+          if (closeIdx !== -1) {
+            const content = strContent.slice(i + 1, closeIdx).trim();
+            const upper = content.toUpperCase();
+            let chrs = null;
+            if (content.length === 1 && upper >= "A" && upper <= "U") {
+              chrs = [144 + upper.charCodeAt(0) - 65];
+            } else {
+              let m = upper.match(/^INK\s+(\d+)$/);
+              if (m) chrs = [16, parseInt(m[1], 10) & 255];
+              if (!chrs) {
+                m = upper.match(/^PAPER\s+(\d+)$/);
+                if (m) chrs = [17, parseInt(m[1], 10) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^FLASH\s+(\d+)$/);
+                if (m) chrs = [18, parseInt(m[1], 10) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^BRIGHT\s+(\d+)$/);
+                if (m) chrs = [19, parseInt(m[1], 10) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^INVERSE\s+(\d+)$/);
+                if (m) chrs = [20, parseInt(m[1], 10) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^OVER\s+(\d+)$/);
+                if (m) chrs = [21, parseInt(m[1], 10) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^AT\s+(\d+)\s*,\s*(\d+)$/);
+                if (m) chrs = [22, parseInt(m[1], 10) & 255, parseInt(m[2], 10) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^TAB\s+(\d+)(?:\s*,\s*(\d+))?$/);
+                if (m) {
+                  chrs = m[2] !== void 0 ? [23, parseInt(m[1], 10) & 255, parseInt(m[2], 10) & 255] : [23, parseInt(m[1], 10) & 255];
+                }
+              }
+              if (!chrs) {
+                m = upper.match(/^CODE\s+(\d+)$/);
+                if (m) chrs = [parseInt(m[1], 10) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^#([0-9A-F]{1,2})$/);
+                if (m) chrs = [parseInt(m[1], 16) & 255];
+              }
+              if (!chrs) {
+                m = upper.match(/^\\X([0-9A-F]{1,2})$/);
+                if (m) chrs = [parseInt(m[1], 16) & 255];
+              }
+            }
+            if (chrs) {
+              hasWildcards = true;
+              if (currentText.length > 0) {
+                parts.push({ type: "text", value: currentText });
+                currentText = "";
+              }
+              parts.push({ type: "chr", values: chrs });
+              i = closeIdx + 1;
+              continue;
+            }
+          }
+        }
+        if (strContent[i] === "\\" && i + 1 < n) {
+          const nextChar = strContent[i + 1].toUpperCase();
+          if (nextChar >= "A" && nextChar <= "U") {
+            hasWildcards = true;
+            if (currentText.length > 0) {
+              parts.push({ type: "text", value: currentText });
+              currentText = "";
+            }
+            parts.push({ type: "chr", values: [144 + nextChar.charCodeAt(0) - 65] });
+            i += 2;
+            continue;
+          }
+          const hexMatch = strContent.slice(i).match(/^\\x([0-9a-fA-F]{2})/i);
+          if (hexMatch) {
+            hasWildcards = true;
+            if (currentText.length > 0) {
+              parts.push({ type: "text", value: currentText });
+              currentText = "";
+            }
+            parts.push({ type: "chr", values: [parseInt(hexMatch[1], 16)] });
+            i += 4;
+            continue;
+          }
+        }
+        currentText += strContent[i];
+        i++;
+      }
+      if (!hasWildcards) {
+        return `"${strContent}"`;
+      }
+      if (currentText.length > 0) {
+        parts.push({ type: "text", value: currentText });
+      }
+      const terms = [];
+      for (const p of parts) {
+        if (p.type === "text") {
+          terms.push(`"${p.value}"`);
+        } else if (p.type === "chr") {
+          for (const val of p.values) {
+            terms.push(`CHR$ ${val}`);
+          }
+        }
+      }
+      return terms.join(" + ");
+    }
+    function translateLineWildcards(line, isJBas = true) {
+      let result = "";
+      let i = 0;
+      const n = line.length;
+      while (i < n) {
+        const c = line[i];
+        if (c === '"') {
+          const start = i + 1;
+          let closeIdx = -1;
+          let k = start;
+          while (k < n) {
+            if (line[k] === '"') {
+              closeIdx = k;
+              break;
+            }
+            k++;
+          }
+          if (closeIdx === -1) {
+            const inner = line.slice(start);
+            result += translateStringLiteralToChr(inner);
+            break;
+          } else {
+            const inner = line.slice(start, closeIdx);
+            result += translateStringLiteralToChr(inner);
+            i = closeIdx + 1;
+            continue;
+          }
+        }
+        if (isJBas && c === "'") {
+          result += line.slice(i);
+          break;
+        }
+        if (line.slice(i, i + 3).toUpperCase() === "REM") {
+          const prevChar = i > 0 ? line[i - 1] : " ";
+          const nextChar = i + 3 < n ? line[i + 3] : " ";
+          if (!/[a-zA-Z0-9_]/.test(prevChar) && !/[a-zA-Z0-9_]/.test(nextChar)) {
+            result += line.slice(i);
+            break;
+          }
+        }
+        result += c;
+        i++;
+      }
+      return result;
+    }
+    function translateWildcardsToChr2(code, options = {}) {
+      if (typeof code !== "string" || !code) {
+        return code;
+      }
+      const isJBas = options.isJBas !== false;
+      const isCrlf = code.includes("\r\n");
+      const separator = isCrlf ? "\r\n" : "\n";
+      const lines = code.split(/\r?\n/);
+      const translatedLines = lines.map((line) => translateLineWildcards(line, isJBas));
+      return translatedLines.join(separator);
+    }
+    module2.exports = {
+      translateStringLiteralToChr,
+      translateLineWildcards,
+      translateWildcardsToChr: translateWildcardsToChr2
+    };
+  }
+});
+
 // src/core/jbas2bas.js
 var require_jbas2bas = __commonJS({
   "src/core/jbas2bas.js"(exports2, module2) {
@@ -285,6 +470,7 @@ var require_jbas2bas = __commonJS({
     } catch {
       path = null;
     }
+    var { translateWildcardsToChr: translateWildcardsToChr2 } = require_wildcards();
     function stripComments(line) {
       let inString = false;
       let i = 0;
@@ -759,12 +945,17 @@ Options:
         compactWhitespace: false,
         optimizePrintAttributes: false
       });
+      const sinclair = {
+        ...step10,
+        text: translateWildcardsToChr2(step10.text)
+      };
       const errors = [.../* @__PURE__ */ new Set([...compact.errors, ...step10.errors, ...comments.errors])];
       const success = compact.success && step10.success && comments.success;
       return {
         compact,
         step10,
         comments,
+        sinclair,
         success,
         errors
       };
@@ -778,7 +969,8 @@ Options:
       optimizeAttributesAndStrings,
       compileJBas: compileJBas2,
       compileJBasFile,
-      transpileJBasAllVersions: transpileJBasAllVersions2
+      transpileJBasAllVersions: transpileJBasAllVersions2,
+      translateWildcardsToChr: translateWildcardsToChr2
     };
     if (require.main === module2) {
       runCli();
@@ -2237,6 +2429,7 @@ var { compileJBas, transpileJBasAllVersions } = require_jbas2bas();
 var { bas2tap, tap2buffer } = require_tapGenerator();
 var { formatKeywordsToUpper } = require_formatter();
 var { createSinclairCompletionProvider } = require_completions();
+var { translateWildcardsToChr } = require_wildcards();
 function getBaseName(uri, extToRemove = "") {
   const segments = uri.path.split("/");
   const last = segments[segments.length - 1] || "program";
@@ -2287,13 +2480,20 @@ async function buildTapFromDocument(doc) {
     const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
     const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
     const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
+    const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
     await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
     await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+    await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(all.sinclair.text));
     basicCode = all.compact.text;
   } else {
     baseName = getBaseName(doc.uri, ".bas");
+    if (!baseName.endsWith(".sinclair")) {
+      const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
+      const encoder = new TextEncoder();
+      await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(translateWildcardsToChr(basicCode)));
+    }
   }
   let autoStartLine = configuredAutoStart;
   if (autoStartLine <= 0) {
@@ -2666,14 +2866,16 @@ ${all.errors.join("\n")}`);
     const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
     const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
     const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
+    const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
     await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
     await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+    await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(all.sinclair.text));
     const openedDoc = await vscode.workspace.openTextDocument(step10Uri);
     await vscode.window.showTextDocument(openedDoc);
     vscode.window.showInformationMessage(
-      `Transpiled 3 versions to dist/: ${baseName}.bas (1x1 optimal), ${baseName}-step10.bas (10x10), ${baseName}-comments.bas (10x10 + REM)`
+      `Transpiled versions to dist/: ${baseName}.bas (1x1), ${baseName}-step10.bas, ${baseName}-comments.bas, ${baseName}.sinclair.bas (standard CHR$)`
     );
   }
   async function handleCompileJBas(uri) {

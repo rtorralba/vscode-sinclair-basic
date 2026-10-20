@@ -101,9 +101,9 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shif
 
 | Command | Identifier | Shortcut | Description |
 |---|---|---|---|
-| **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Generates 3 `.bas` versions in `dist/` and builds `.tap` strictly from the optimal 1x1 no-comments version (`<name>.bas`). |
-| **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Generates 3 versions in `dist/` (`<name>.bas` 1x1, `<name>-step10.bas` 10x10, `<name>-comments.bas` 10x10+REM) and opens `step10` in editor. |
-| **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` directly to a ZX Spectrum `.tap` 1:1 (preserving line numbers, comments, and parsing `bas2tap` wildcards). |
+| **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Generates `.bas` versions in `dist/` (including `<name>.sinclair.bas` translating `bas2tap` wildcards to standard `CHR$`) and builds `.tap` from the optimal 1x1 version. |
+| **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Generates 4 versions in `dist/` (`<name>.bas` 1x1, `<name>-step10.bas`, `<name>-comments.bas`, and `<name>.sinclair.bas` with standard `CHR$`) and opens `step10` in editor. |
+| **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` directly to `.tap` and generates `dist/<name>.sinclair.bas` translating `bas2tap` wildcards to standard `CHR$`. |
 | **Format Keywords to Uppercase** | `sinclairBasic.formatKeywords` | `Shift+Alt+F` | Formats document or selection converting all Sinclair BASIC keywords to uppercase (preserving strings and comments). |
 | **Renumber BAS Lines (.bas)** | `sinclairBasic.renumber` / `renumberBas` | `Ctrl+Alt+R` | Renumbers lines in `.bas` (10 by 10) and updates all jump references (`GOTO`, `GOSUB`, `RESTORE`, etc.). |
 | **Run in Emulator** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured emulator (built-in Turbo80 Webview or external Fuse). |
