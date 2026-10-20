@@ -179,8 +179,8 @@ if defined VSCE_PAT (
     echo [INFO] Detectada variable de entorno VSCE_PAT.
     set PAT_ARG=-p "!VSCE_PAT!"
 ) else (
-    echo Deseas introducir tu Personal Access Token (PAT) ahora?
-    echo (Si ya hiciste 'vsce login' previamente en este equipo, pulsa ENTER para omitir)
+    echo Deseas introducir tu Personal Access Token PAT ahora?
+    echo [Si ya hiciste vsce login previamente en este equipo, pulsa ENTER para omitir]
     set /p USER_PAT="PAT Token (o Enter para omitir): "
     if not "!USER_PAT!"=="" (
         set PAT_ARG=-p "!USER_PAT!"
