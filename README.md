@@ -60,7 +60,23 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
     * **ZX Spectrum ROM `0x0D` Guard**: Automatically preserves `AT 13, col` and `AT row, 13` in standard Sinclair BASIC syntax (`PRINT AT 13, 7; "{PAPER 7} "`). This safeguards against injecting byte 13 (`0x0D` / `ENTER`) inside string literals, which would cause the ZX Spectrum ROM parser to prematurely terminate the line and throw error `C Nonsense in BASIC`.
   * Transpiles to clean, standard numbered `.bas` or compiles directly to `.tap`.
 
-### 2. Intelligent Line Renumbering (`.bas`)
+### 2. Autocompletion & IntelliSense (`.bas` & `.jbas`)
+* **Comprehensive Sinclair BASIC Keywords**: Instant completion for all Sinclair ZX Spectrum BASIC statements (`PRINT`, `LET`, `IF`, `FOR`, `NEXT`, `GO TO`, `POKE`, etc.), functions (`PEEK`, `CHR$`, `CODE`, `INKEY$`, `SCREEN$`, `ATTR`, `POINT`, `RND`, `BIN`, `USR`, etc.), and display attributes (`BORDER`, `PAPER`, `INK`, `FLASH`, `BRIGHT`, `INVERSE`, `OVER`).
+* **Rich Documentation & Syntax Previews**: Each keyword item includes syntax reference and detailed markdown explanation.
+* **Smart Snippet Templates**: Expand common structures like `FOR...TO...NEXT`, `IF...THEN`, `DEF FN`, and `PRINT AT` with interactive tab stops.
+* **Control Code Completion**: Typing inside `{` in string literals suggests `bas2tap` control codes (`INK`, `PAPER`, `FLASH`, `BRIGHT`, `INVERSE`, `OVER`, `AT`, `TAB`, `CODE`).
+* **Label Completion in `.jbas`**: Typing `@` automatically suggests jump labels defined across the current document.
+
+### 3. Uppercase Keyword Formatter (`Shift+Alt+F`)
+* **Standard VS Code Formatting**: Formats full document or selection with `Shift+Alt+F`, right-click "Format Document", or on save via `editor.formatOnSave`.
+* **Converts All Keywords to UPPERCASE**: Ensures authentic Sinclair BASIC appearance and style.
+* **Zero False Positives**:
+  * Text inside double quotes (`"..."`) is 100% strictly preserved.
+  * `REM` comments and JBAS single-quote comments (`' ...`) are 100% strictly preserved.
+  * JBAS `@labels` are strictly preserved.
+  * Variables containing keyword substrings (e.g. `score`, `total`, `stopwatch`, `point1`) are never touched.
+
+### 4. Intelligent Line Renumbering (`.bas`)
 * Renumbers program lines starting at line 10 with step 10 (or user-configured values).
 * Automatically updates all jump and line references:
   * `GO TO` / `GOTO`
@@ -72,7 +88,7 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
   * Multi-target computed jumps: `ON x GO TO 10, 20, 30`
 * **Zero false positives**: Strings (`PRINT "GOTO 10"`) and `REM` comments are completely untouched.
 
-### 3. Integrated Toolchain & Emulation
+### 5. Integrated Toolchain & Emulation
 * **Built-in Pure JavaScript TAP Generator**: Blazing fast, zero external dependencies (no `bas2tap` executable required). Automatically encodes Sinclair BASIC keywords, Spectrum floating-point numbers, UDGs, and headers with autostart line. Full byte-for-byte parity with `bas2tap` whitespace rules, avoiding unwanted double spaces when programs are listed by the ZX Spectrum ROM (e.g., `LET py=0`, `CHR$ 18`). An optional fallback to external `bas2tap` is available via settings.
 * **Built-in Web Emulator (Turbo80)**: Instant execution inside a VS Code tab with zero external installs. Features authentic audio, CRT shader effects, 48K/128K model selection, and on-screen keyboard support.
 * **External Desktop Emulator Support**: One-click build and launch in external emulators (e.g. Fuse, CSpect, Retro Virtual Machine) if preferred.
@@ -88,6 +104,7 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shif
 | **Compile JBAS to TAP** | `sinclairBasic.compileJBas` | `Ctrl+Shift+B` | Generates 3 `.bas` versions in `dist/` and builds `.tap` strictly from the optimal 1x1 no-comments version (`<name>.bas`). |
 | **Transpile JBAS to BAS** | `sinclairBasic.transpileJBas` | `Ctrl+Shift+T` | Generates 3 versions in `dist/` (`<name>.bas` 1x1, `<name>-step10.bas` 10x10, `<name>-comments.bas` 10x10+REM) and opens `step10` in editor. |
 | **Compile BAS to TAP** | `sinclairBasic.compileBas` / `buildTap` | `Ctrl+Shift+B` | Compiles `.bas` directly to a ZX Spectrum `.tap` 1:1 (preserving line numbers, comments, and parsing `bas2tap` wildcards). |
+| **Format Keywords to Uppercase** | `sinclairBasic.formatKeywords` | `Shift+Alt+F` | Formats document or selection converting all Sinclair BASIC keywords to uppercase (preserving strings and comments). |
 | **Renumber BAS Lines (.bas)** | `sinclairBasic.renumber` / `renumberBas` | `Ctrl+Alt+R` | Renumbers lines in `.bas` (10 by 10) and updates all jump references (`GOTO`, `GOSUB`, `RESTORE`, etc.). |
 | **Run in Emulator** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured emulator (built-in Turbo80 Webview or external Fuse). |
 | **Run in Web Emulator (Turbo80)** | `sinclairBasic.runTurbo80` | — | Forces execution in the built-in Turbo80 web emulator tab. |

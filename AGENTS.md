@@ -56,7 +56,10 @@ vscode-sinclair-basic/
 |   +-- core/
 |       |-- renumber.js                  # Core engine: Sinclair BASIC line renumbering & jump target updates
 |       |-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
-|       +-- tapGenerator.js              # Core engine: Native Pure JS ZX Spectrum .tap generator
+|       |-- tapGenerator.js              # Core engine: Native Pure JS ZX Spectrum .tap generator
+|       |-- keywords.js                  # Core metadata: Sinclair BASIC keyword definitions, docs & snippets
+|       |-- formatter.js                 # Core engine: Uppercase keyword formatter with string & comment protection
+|       +-- completions.js               # Autocompletion provider logic for Sinclair BASIC & JBAS
 |-- dist/
 |   +-- webExtension.js                  # Bundled single-file web extension (built via esbuild)
 |-- test/
@@ -64,7 +67,9 @@ vscode-sinclair-basic/
 |   |   +-- sample.bas                   # Test fixture with jump matrix
 |   |-- renumber.test.js                 # Unit tests for renumbering engine
 |   |-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
-|   +-- tapGenerator.test.js             # Unit tests for pure JS tap generator
+|   |-- tapGenerator.test.js             # Unit tests for pure JS tap generator
+|   |-- formatter.test.js                # Unit tests for uppercase keyword formatter
+|   +-- completions.test.js              # Unit tests for autocompletion provider
 |-- AGENTS.md                            # Complete AI instructions (this file)
 |-- README.md                            # User-facing documentation & quickstart
 |-- LICENSE                              # MIT License
@@ -119,7 +124,7 @@ vscode-sinclair-basic/
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 30 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 46 passing tests.
 
 ---
 

@@ -149,6 +149,12 @@
         "title": "Select Emulator Executable...",
         "category": "Sinclair BASIC",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "sinclairBasic.formatKeywords",
+        "title": "Format Keywords to Uppercase",
+        "category": "Sinclair BASIC",
+        "icon": "$(case-sensitive)"
       }
     ],
     "menus": {
@@ -201,6 +207,11 @@
           "group": "2_build@1"
         },
         {
+          "command": "sinclairBasic.formatKeywords",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "1_modification@2"
+        },
+        {
           "command": "sinclairBasic.runEmulator",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "2_build@2"
@@ -228,13 +239,24 @@
           "group": "sinclair@2"
         },
         {
-          "command": "sinclairBasic.runEmulator",
+          "command": "sinclairBasic.formatKeywords",
           "when": "resourceExtname == .bas || resourceExtname == .jbas",
           "group": "sinclair@3"
+        },
+        {
+          "command": "sinclairBasic.runEmulator",
+          "when": "resourceExtname == .bas || resourceExtname == .jbas",
+          "group": "sinclair@4"
         }
       ]
     },
     "keybindings": [
+      {
+        "command": "sinclairBasic.formatKeywords",
+        "key": "shift+alt+f",
+        "mac": "shift+alt+f",
+        "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
+      },
       {
         "command": "sinclairBasic.transpileJBas",
         "key": "ctrl+shift+t",

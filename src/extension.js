@@ -10,6 +10,8 @@ const { execFile } = require('child_process');
 const { renumberProgram } = require('./core/renumber');
 const { compileJBas, transpileJBasAllVersions } = require('./core/jbas2bas');
 const { generateTapFile } = require('./core/tapGenerator');
+const { formatKeywordsToUpper } = require('./core/formatter');
+const { createSinclairCompletionProvider } = require('./core/completions');
 
 /**
  * Resolves the target document from an optional command URI parameter or active text editor.
@@ -894,11 +896,103 @@ function activate(context) {
     }
   });
 
+  // Command: Format Keywords to Uppercase in Sinclair BASIC (.bas or .jbas)
+  async function handleFormatKeywords(uri) {
+    let editor = vscode.window.activeTextEditor;
+    if (uri && uri.fsPath && (!editor || editor.document.uri.toString() !== uri.toString())) {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      editor = await vscode.window.showTextDocument(doc);
+    }
+
+    if (!editor) {
+      vscode.window.showInformationMessage('No active Sinclair BASIC (.bas or .jbas) editor found.');
+      return;
+    }
+
+    const doc = editor.document;
+    const isJBas = doc.languageId === 'jbas' || doc.fileName.endsWith('.jbas');
+
+    if (editor.selection && !editor.selection.isEmpty) {
+      const sel = editor.selection;
+      const fullRange = new vscode.Range(
+        new vscode.Position(sel.start.line, 0),
+        doc.lineAt(sel.end.line).range.end
+      );
+      const text = doc.getText(fullRange);
+      const formatted = formatKeywordsToUpper(text, { isJBas });
+      if (formatted !== text) {
+        await editor.edit(editBuilder => {
+          editBuilder.replace(fullRange, formatted);
+        });
+      }
+    } else {
+      const fullText = doc.getText();
+      const formatted = formatKeywordsToUpper(fullText, { isJBas });
+      if (formatted !== fullText) {
+        const fullRange = new vscode.Range(
+          doc.positionAt(0),
+          doc.positionAt(fullText.length)
+        );
+        await editor.edit(editBuilder => {
+          editBuilder.replace(fullRange, formatted);
+        });
+      }
+    }
+  }
+
+  // Completion Provider: Sinclair BASIC keywords, functions, attributes, snippets, and @labels
+  const completionProvider = vscode.languages.registerCompletionItemProvider(
+    ['sinclair-basic', 'jbas'],
+    createSinclairCompletionProvider(vscode),
+    '@', '{'
+  );
+
+  // Document Formatting Provider: Shift+Alt+F or Format Document
+  const documentFormattingProvider = vscode.languages.registerDocumentFormattingEditProvider(
+    ['sinclair-basic', 'jbas'],
+    {
+      provideDocumentFormattingEdits(document) {
+        const isJBas = document.languageId === 'jbas' || document.fileName.endsWith('.jbas');
+        const fullText = document.getText();
+        const formatted = formatKeywordsToUpper(fullText, { isJBas });
+        if (formatted === fullText) return [];
+        const fullRange = new vscode.Range(
+          document.positionAt(0),
+          document.positionAt(fullText.length)
+        );
+        return [vscode.TextEdit.replace(fullRange, formatted)];
+      }
+    }
+  );
+
+  // Document Range Formatting Provider: Format Selection
+  const rangeFormattingProvider = vscode.languages.registerDocumentRangeFormattingEditProvider(
+    ['sinclair-basic', 'jbas'],
+    {
+      provideDocumentRangeFormattingEdits(document, range) {
+        const isJBas = document.languageId === 'jbas' || document.fileName.endsWith('.jbas');
+        const startLine = range.start.line;
+        const endLine = range.end.line;
+        const fullRange = new vscode.Range(
+          new vscode.Position(startLine, 0),
+          document.lineAt(endLine).range.end
+        );
+        const text = document.getText(fullRange);
+        const formatted = formatKeywordsToUpper(text, { isJBas });
+        if (formatted === text) return [];
+        return [vscode.TextEdit.replace(fullRange, formatted)];
+      }
+    }
+  );
+
   // Register commands and language providers
   context.subscriptions.push(
     // Renumber commands (sinclairBasic.renumber & sinclairBasic.renumberBas)
     vscode.commands.registerCommand('sinclairBasic.renumber', handleRenumber),
     vscode.commands.registerCommand('sinclairBasic.renumberBas', handleRenumber),
+
+    // Format keywords to uppercase
+    vscode.commands.registerCommand('sinclairBasic.formatKeywords', handleFormatKeywords),
 
     // Transpile JBAS to BAS (numbers 10 by 10)
     vscode.commands.registerCommand('sinclairBasic.transpileJBas', handleTranspileJBas),
@@ -928,6 +1022,11 @@ function activate(context) {
     referenceProvider,
     symbolProvider,
     renameProvider,
+
+    // Autocompletion & formatting providers
+    completionProvider,
+    documentFormattingProvider,
+    rangeFormattingProvider,
 
     // Diagnostics for duplicate labels
     jbasDiagnostics,
