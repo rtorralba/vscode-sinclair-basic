@@ -179,5 +179,14 @@ npm test
 
 ---
 
-## License
-MIT License.
+## License & Copyright
+
+GNU Affero General Public License v3.0 (AGPL-3.0).  
+Copyright (C) 2026 **Raül Torralba**.
+
+> **Renuncia de garantía / Disclaimer (AS IS)**: El software se proporciona "tal cual" (*AS IS*), sin garantía de ningún tipo, expresa o implícita. En ningún caso el autor será responsable de ningún reclamo, daño u otra responsabilidad derivada del uso de este software.
+
+See the full [LICENSE](LICENSE) file for complete details.
+
+### Acknowledgements & Special Attribution / Mención Especial
+* **Turbo80**: Built-in ZX Spectrum web emulation and instant game sharing powered by [Turbo80](https://turbo80.com), created by **José Enrique García (Incinerator)**. Special thanks and attribution for his outstanding contribution to the retrocomputing community.

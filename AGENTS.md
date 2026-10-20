@@ -80,7 +80,7 @@ vscode-sinclair-basic/
 |   +-- completions.test.js              # Unit tests for autocompletion provider
 |-- AGENTS.md                            # Complete AI instructions (this file)
 |-- README.md                            # User-facing documentation & quickstart
-|-- LICENSE                              # MIT License
+|-- LICENSE                              # GNU AGPL v3 License (Copyright Raül Torralba & Turbo80 attribution)
 +-- package.json                         # Extension manifest, language definitions & configuration schema
 ```
 
