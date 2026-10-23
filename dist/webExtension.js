@@ -2814,13 +2814,262 @@ var require_debugger = __commonJS({
       }
       return { startCol: codeStart, endCol: lineText.length };
     }
+    var SinclairBasicDebugAdapterCore2 = class {
+      constructor(options = {}) {
+        this.sendEvent = options.sendEvent || (() => {
+        });
+        this.sendResponse = options.sendResponse || (() => {
+        });
+        this.onAction = options.onAction || (() => {
+        });
+        this.seq = 1;
+        this.currentLine = null;
+        this.currentStmt = null;
+        this.currentVars = [];
+        this.currentDocText = "";
+        this.currentFilePath = "";
+        this.breakpoints = /* @__PURE__ */ new Map();
+      }
+      setDocument(filePath, docText) {
+        this.currentFilePath = filePath || "";
+        this.currentDocText = docText || "";
+      }
+      handleMessage(message) {
+        if (!message) return;
+        if (message.type === "request") {
+          this.handleRequest(message);
+        }
+      }
+      _sendSuccess(request, body = {}) {
+        this.sendResponse({
+          seq: this.seq++,
+          type: "response",
+          request_seq: request.seq,
+          command: request.command,
+          success: true,
+          body
+        });
+      }
+      _sendError(request, message) {
+        this.sendResponse({
+          seq: this.seq++,
+          type: "response",
+          request_seq: request.seq,
+          command: request.command,
+          success: false,
+          message
+        });
+      }
+      handleRequest(request) {
+        const { command, arguments: args = {} } = request;
+        switch (command) {
+          case "initialize": {
+            this._sendSuccess(request, {
+              supportsConfigurationDoneRequest: true,
+              supportsRestartRequest: true,
+              supportsTerminateRequest: true,
+              supportsConditionalBreakpoints: false,
+              supportsHitConditionalBreakpoints: false,
+              supportsSetVariable: false,
+              supportsStepBack: false,
+              supportsStepInTargetsRequest: false
+            });
+            this.sendEvent("initialized", {});
+            break;
+          }
+          case "launch": {
+            if (args.program) {
+              this.currentFilePath = args.program;
+            }
+            this.onAction("launch", args);
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "setBreakpoints": {
+            const sourcePath = args.source && (args.source.path || args.source.name) || "";
+            const clientBreakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
+            const basicLines = [];
+            const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+            for (const bp of clientBreakpoints) {
+              const docLine0 = bp.line - 1;
+              if (docLine0 >= 0 && docLine0 < lines.length) {
+                const m = lines[docLine0].match(/^\s*(\d+)/);
+                if (m) {
+                  basicLines.push(parseInt(m[1], 10));
+                } else {
+                  basicLines.push(bp.line);
+                }
+              } else {
+                basicLines.push(bp.line);
+              }
+            }
+            this.breakpoints.set(sourcePath, new Set(basicLines));
+            this.onAction("setBreakpoints", {
+              sourcePath,
+              lines: basicLines,
+              rawBreakpoints: clientBreakpoints
+            });
+            this._sendSuccess(request, {
+              breakpoints: clientBreakpoints.map((bp) => ({
+                verified: true,
+                line: bp.line
+              }))
+            });
+            break;
+          }
+          case "setExceptionBreakpoints": {
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "configurationDone": {
+            this.onAction("configurationDone", {});
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "threads": {
+            this._sendSuccess(request, {
+              threads: [
+                { id: 1, name: "ZX Spectrum 48K (Sinclair BASIC)" }
+              ]
+            });
+            break;
+          }
+          case "stackTrace": {
+            const frames = [];
+            if (this.currentLine != null) {
+              const docLine0 = findDocumentLine2(this.currentDocText, this.currentLine);
+              const docLine1 = docLine0 >= 0 ? docLine0 + 1 : 1;
+              const lineText = docLine0 >= 0 && this.currentDocText ? this.currentDocText.split(/\r?\n/)[docLine0] : "";
+              const stmtRange = findStatementRange2(lineText, this.currentStmt || 1);
+              const fileName = this.currentFilePath ? this.currentFilePath.replace(/\\/g, "/").split("/").pop() : "program.bas";
+              frames.push({
+                id: 1,
+                name: `L\xEDnea ${this.currentLine} [Sentencia ${this.currentStmt || 1}]`,
+                source: {
+                  name: fileName,
+                  path: this.currentFilePath
+                },
+                line: docLine1,
+                column: stmtRange.startCol + 1,
+                endColumn: stmtRange.endCol + 1
+              });
+            }
+            this._sendSuccess(request, {
+              stackFrames: frames,
+              totalFrames: frames.length
+            });
+            break;
+          }
+          case "scopes": {
+            this._sendSuccess(request, {
+              scopes: [
+                {
+                  name: "Variables en RAM (VARS)",
+                  presentationHint: "locals",
+                  variablesReference: 1e3,
+                  expensive: false
+                }
+              ]
+            });
+            break;
+          }
+          case "variables": {
+            const dapVars = (this.currentVars || []).map((v) => {
+              let valStr = "";
+              if (v.type === "string") {
+                valStr = `"${v.value}"`;
+              } else if (v.type === "for") {
+                valStr = `${v.value} (TO ${v.limit} STEP ${v.step})`;
+              } else {
+                valStr = String(v.value);
+              }
+              return {
+                name: v.name,
+                value: valStr,
+                type: v.type,
+                variablesReference: 0
+              };
+            });
+            this._sendSuccess(request, {
+              variables: dapVars
+            });
+            break;
+          }
+          case "continue": {
+            this.onAction("continue", {});
+            this._sendSuccess(request, { allThreadsContinued: true });
+            this.sendEvent("continued", { threadId: 1, allThreadsContinued: true });
+            break;
+          }
+          case "pause": {
+            this.onAction("pause", {});
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "next": {
+            this.onAction("stepLine", {});
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "stepIn": {
+            this.onAction("stepStmt", {});
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "stepOut": {
+            this.onAction("stepLine", {});
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "restart": {
+            this.onAction("restart", {});
+            this._sendSuccess(request, {});
+            break;
+          }
+          case "disconnect":
+          case "terminate": {
+            this.onAction("stop", {});
+            this._sendSuccess(request, {});
+            this.sendEvent("terminated", {});
+            this.sendEvent("exited", { exitCode: 0 });
+            break;
+          }
+          default: {
+            this._sendSuccess(request, {});
+            break;
+          }
+        }
+      }
+      notifyPaused(line, stmt, vars, reason = "breakpoint") {
+        this.currentLine = line;
+        this.currentStmt = stmt;
+        this.currentVars = Array.isArray(vars) ? vars : [];
+        this.sendEvent("stopped", {
+          reason,
+          threadId: 1,
+          allThreadsStopped: true,
+          description: `L\xEDnea ${line}, Sentencia ${stmt}`
+        });
+      }
+      notifyResumed() {
+        this.sendEvent("continued", {
+          threadId: 1,
+          allThreadsContinued: true
+        });
+      }
+      notifyTerminated() {
+        this.sendEvent("terminated", {});
+        this.sendEvent("exited", { exitCode: 0 });
+      }
+    };
     module2.exports = {
       ROM48_STMT_ADDR,
       ROM48_LOOP_ADDR,
       decodeSinclairFloat,
       readSpectrumVariables,
       findDocumentLine: findDocumentLine2,
-      findStatementRange: findStatementRange2
+      findStatementRange: findStatementRange2,
+      SinclairBasicDebugAdapterCore: SinclairBasicDebugAdapterCore2
     };
   }
 });
@@ -2860,145 +3109,6 @@ var require_turbo80Html = __commonJS({
       overflow: hidden;
       display: flex;
       flex-direction: column;
-    }
-    /* Sinclair BASIC Debugger Bar */
-    #debug-bar {
-      height: 38px;
-      background: #141420;
-      border-bottom: 1px solid #2a2a3e;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 1rem;
-      font-size: 12px;
-      color: #e9e9f2;
-      user-select: none;
-      flex-shrink: 0;
-      z-index: 1000;
-    }
-    .dbg-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-    }
-    .dbg-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
-    .dbg-badge.running {
-      background: rgba(87, 239, 158, 0.15);
-      color: #57ef9e;
-      border: 1px solid rgba(87, 239, 158, 0.4);
-    }
-    .dbg-badge.paused {
-      background: rgba(255, 204, 0, 0.2);
-      color: #ffcc00;
-      border: 1px solid rgba(255, 204, 0, 0.6);
-      box-shadow: 0 0 8px rgba(255, 204, 0, 0.3);
-    }
-    .dbg-pos {
-      color: #b0b0c8;
-      font-size: 11.5px;
-    }
-    .dbg-actions {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .dbg-btn {
-      background: #1c1c2a;
-      color: #e2e2ee;
-      border: 1px solid #36364e;
-      border-radius: 4px;
-      padding: 3px 8px;
-      font-size: 11.5px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: background 0.15s, border-color 0.15s;
-    }
-    .dbg-btn:hover {
-      background: #2a2a40;
-      border-color: #5c5c8a;
-    }
-    .dbg-btn.primary {
-      background: #1e3355;
-      border-color: #37d0ff;
-      color: #ffffff;
-    }
-    .dbg-btn.primary:hover {
-      background: #284472;
-    }
-    .dbg-btn.danger {
-      background: #3e1b24;
-      border-color: #ff4766;
-      color: #ffffff;
-    }
-    .dbg-btn.danger:hover {
-      background: #552531;
-    }
-    #debug-vars-drawer {
-      position: absolute;
-      bottom: 34px;
-      left: 0;
-      right: 0;
-      max-height: 180px;
-      background: rgba(18, 18, 26, 0.96);
-      backdrop-filter: blur(8px);
-      border-top: 1px solid #323248;
-      display: flex;
-      flex-direction: column;
-      z-index: 1000;
-    }
-    .dbg-vars-header {
-      height: 28px;
-      background: #14141e;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 12px;
-      font-size: 11px;
-      font-weight: 600;
-      color: #9b9bb0;
-      border-bottom: 1px solid #28283a;
-    }
-    .dbg-vars-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 6px;
-      padding: 8px 12px;
-      overflow-y: auto;
-      max-height: 140px;
-      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-      font-size: 12px;
-    }
-    .dbg-var-card {
-      background: #181826;
-      padding: 4px 8px;
-      border-radius: 4px;
-      border: 1px solid #2d2d42;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .dbg-var-name {
-      color: #37d0ff;
-      font-weight: 600;
-    }
-    .dbg-var-val {
-      color: #57ef9e;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 90px;
     }
     #emulator-wrap {
       flex: 1;
@@ -3071,34 +3181,8 @@ var require_turbo80Html = __commonJS({
   </style>
 </head>
 <body>
-  <div id="debug-bar" style="display: none;">
-    <div class="dbg-left">
-      <span class="dbg-badge running" id="dbg-status-badge">\u25CF EJECUTANDO</span>
-      <span class="dbg-pos" id="dbg-pos">L\xEDnea --, Sent. --</span>
-    </div>
-    <div class="dbg-actions">
-      <button class="dbg-btn primary" id="btn-dbg-continue" title="Continuar ejecuci\xF3n (F5)">\u25B6 Continuar</button>
-      <button class="dbg-btn" id="btn-dbg-pause" title="Pausar ejecuci\xF3n (F6)" style="display: none;">\u23F8 Pausar</button>
-      <button class="dbg-btn" id="btn-dbg-stepline" title="Paso de L\xEDnea (F10)">\u21B7 L\xEDnea</button>
-      <button class="dbg-btn" id="btn-dbg-stepstmt" title="Paso de Sentencia (F11)">\u21F2 Sentencia</button>
-      <button class="dbg-btn" id="btn-dbg-restart" title="Reiniciar desde la l\xEDnea 1">\u{1F504} Reiniciar</button>
-      <button class="dbg-btn danger" id="btn-dbg-stop" title="Detener depuraci\xF3n">\u23F9 Detener</button>
-    </div>
-    <div class="dbg-right">
-      <button class="dbg-btn" id="btn-dbg-toggle-vars" title="Inspeccionar variables en memoria RAM">\u{1F4CB} Variables (<span id="dbg-var-count">0</span>)</button>
-    </div>
-  </div>
   <div id="emulator-wrap">
     <div id="spectrum" style="width: 100%;"></div>
-    <div id="debug-vars-drawer" style="display: none;">
-      <div class="dbg-vars-header">
-        <span>Variables en memoria (ZX Spectrum RAM)</span>
-        <button class="dbg-btn" id="btn-close-vars" style="padding: 1px 6px;">\u2715</button>
-      </div>
-      <div class="dbg-vars-grid" id="dbg-vars-list">
-        <div style="color: #727288; grid-column: 1/-1; padding: 6px 0;">Sin variables asignadas en RAM</div>
-      </div>
-    </div>
   </div>
   <footer id="footer">
     <div class="status-badge">
@@ -3420,7 +3504,7 @@ var require_turbo80Html = __commonJS({
         this.lastPausedStmt = stmt;
         this.vars = readSpectrumVariables(a => spectrum.memory.read(a));
 
-        updateDebugUI('paused', line, stmt, this.vars);
+        updateFooterStatus('paused', line, stmt);
         vscode.postMessage({
           command: 'basicPaused',
           line: line,
@@ -3430,49 +3514,31 @@ var require_turbo80Html = __commonJS({
       }
     };
 
-    function updateDebugUI(status, line, stmt, vars) {
-      const bar = document.getElementById('debug-bar');
-      const badge = document.getElementById('dbg-status-badge');
-      const pos = document.getElementById('dbg-pos');
-      const varCount = document.getElementById('dbg-var-count');
-      const varsList = document.getElementById('dbg-vars-list');
+    function updateFooterStatus(status, line, stmt) {
+      const title = document.getElementById('game-title');
+      const dot = document.querySelector('.status-dot');
+      if (!title) return;
 
       if (!basicDebugger.enabled) {
-        bar.style.display = 'none';
+        if (dot) {
+          dot.style.background = '#57ef9e';
+          dot.style.boxShadow = '0 0 8px rgba(87, 239, 158, 0.7)';
+        }
         return;
       }
 
-      bar.style.display = 'flex';
-
       if (status === 'paused') {
-        badge.className = 'dbg-badge paused';
-        badge.textContent = '\u25CF PAUSADO';
-        pos.textContent = 'L\xEDnea ' + line + ', Sent. ' + stmt;
-        document.getElementById('btn-dbg-continue').style.display = 'inline-flex';
-        document.getElementById('btn-dbg-pause').style.display = 'none';
+        if (dot) {
+          dot.style.background = '#ffcc00';
+          dot.style.boxShadow = '0 0 8px rgba(255, 204, 0, 0.8)';
+        }
+        title.textContent = (pendingData && pendingData.filename ? pendingData.filename + ' \u2014 ' : '') + 'Pausado (L\xEDnea ' + line + ', Sent. ' + stmt + ')';
       } else {
-        badge.className = 'dbg-badge running';
-        badge.textContent = '\u25CF EJECUTANDO';
-        if (line != null) {
-          pos.textContent = 'L\xEDnea ' + line + '...';
+        if (dot) {
+          dot.style.background = '#57ef9e';
+          dot.style.boxShadow = '0 0 8px rgba(87, 239, 158, 0.7)';
         }
-        document.getElementById('btn-dbg-continue').style.display = 'none';
-        document.getElementById('btn-dbg-pause').style.display = 'inline-flex';
-      }
-
-      if (vars) {
-        varCount.textContent = vars.length;
-        if (vars.length === 0) {
-          varsList.innerHTML = '<div style="color: #727288; grid-column: 1/-1; padding: 6px 0;">Sin variables asignadas en RAM</div>';
-        } else {
-          varsList.innerHTML = vars.map(v => {
-            const valStr = v.type === 'string' ? '"' + v.value + '"' : String(v.value);
-            return '<div class="dbg-var-card" title="' + v.name + ' (' + v.type + ') = ' + valStr + '">' +
-              '<span class="dbg-var-name">' + v.name + '</span>' +
-              '<span class="dbg-var-val">' + valStr + '</span>' +
-            '</div>';
-          }).join('');
-        }
+        title.textContent = (pendingData && pendingData.filename) ? pendingData.filename : 'ZX Spectrum';
       }
     }
 
@@ -3480,7 +3546,7 @@ var require_turbo80Html = __commonJS({
       if (emulator) {
         basicDebugger.stepMode = null;
         basicDebugger.pauseRequested = false;
-        updateDebugUI('running');
+        updateFooterStatus('running');
         vscode.postMessage({ command: 'basicResumed' });
         emulator.resume();
       }
@@ -3494,7 +3560,7 @@ var require_turbo80Html = __commonJS({
       if (emulator) {
         basicDebugger.stepMode = 'line';
         basicDebugger.lastLine = basicDebugger.lastPausedLine;
-        updateDebugUI('running', basicDebugger.lastPausedLine);
+        updateFooterStatus('running');
         vscode.postMessage({ command: 'basicResumed' });
         emulator.resume();
       }
@@ -3505,7 +3571,7 @@ var require_turbo80Html = __commonJS({
         basicDebugger.stepMode = 'stmt';
         basicDebugger.lastLine = basicDebugger.lastPausedLine;
         basicDebugger.lastStmt = basicDebugger.lastPausedStmt;
-        updateDebugUI('running', basicDebugger.lastPausedLine);
+        updateFooterStatus('running');
         vscode.postMessage({ command: 'basicResumed' });
         emulator.resume();
       }
@@ -3520,26 +3586,10 @@ var require_turbo80Html = __commonJS({
 
     function doStop() {
       basicDebugger.enabled = false;
-      document.getElementById('debug-bar').style.display = 'none';
-      document.getElementById('debug-vars-drawer').style.display = 'none';
+      updateFooterStatus('running');
       vscode.postMessage({ command: 'debugStopped' });
       if (emulator) emulator.resume();
     }
-
-    document.getElementById('btn-dbg-continue').onclick = doContinue;
-    document.getElementById('btn-dbg-pause').onclick = doPause;
-    document.getElementById('btn-dbg-stepline').onclick = doStepLine;
-    document.getElementById('btn-dbg-stepstmt').onclick = doStepStmt;
-    document.getElementById('btn-dbg-restart').onclick = doRestart;
-    document.getElementById('btn-dbg-stop').onclick = doStop;
-
-    document.getElementById('btn-dbg-toggle-vars').onclick = function () {
-      const drawer = document.getElementById('debug-vars-drawer');
-      drawer.style.display = (drawer.style.display === 'none') ? 'flex' : 'none';
-    };
-    document.getElementById('btn-close-vars').onclick = function () {
-      document.getElementById('debug-vars-drawer').style.display = 'none';
-    };
 
     window.addEventListener('keydown', function (e) {
       if (!basicDebugger.enabled) return;
@@ -3570,10 +3620,10 @@ var require_turbo80Html = __commonJS({
           if (msg.stopOnEntry || basicDebugger.breakpoints.size === 0) {
             basicDebugger.pauseRequested = true;
           }
-          updateDebugUI(basicDebugger.pauseRequested ? 'paused' : 'running', 1, 1, []);
+          updateFooterStatus(basicDebugger.pauseRequested ? 'paused' : 'running', 1, 1);
         } else {
           basicDebugger.enabled = false;
-          updateDebugUI();
+          updateFooterStatus('running');
         }
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
           applyTap(msg);
@@ -3644,7 +3694,8 @@ var { findBasJumpTargetAtPosition, findBasLineIndex } = require_definitions();
 var { uploadTapToHost, buildTurbo80ShareUrl } = require_share();
 var {
   findDocumentLine,
-  findStatementRange
+  findStatementRange,
+  SinclairBasicDebugAdapterCore
 } = require_debugger();
 var { getTurbo80Html } = require_turbo80Html();
 function getBaseName(uri, extToRemove = "") {
@@ -3735,6 +3786,63 @@ function activate(context) {
   let activeDebugStmt = null;
   let activeDebugVars = [];
   let isDebuggingActive = false;
+  let activeDebugAdapter = null;
+  class SinclairBasicDebugAdapter {
+    constructor(session) {
+      this._sendMessage = new vscode.EventEmitter();
+      this.onDidSendMessage = this._sendMessage.event;
+      this.session = session;
+      this.core = new SinclairBasicDebugAdapterCore({
+        sendEvent: (event, body) => {
+          this._sendMessage.fire({
+            type: "event",
+            event,
+            body
+          });
+        },
+        sendResponse: (response) => {
+          this._sendMessage.fire(response);
+        },
+        onAction: (action, data) => {
+          if (action === "continue") {
+            handleDebugContinue();
+          } else if (action === "pause") {
+            handleDebugPause();
+          } else if (action === "stepLine") {
+            handleDebugStepLine();
+          } else if (action === "stepStmt") {
+            handleDebugStepStmt();
+          } else if (action === "restart") {
+            handleDebugRestart();
+          } else if (action === "stop") {
+            handleDebugStop();
+          } else if (action === "setBreakpoints") {
+            if (currentTurbo80Panel) {
+              currentTurbo80Panel.webview.postMessage({
+                command: "setBreakpoints",
+                breakpoints: data.lines
+              });
+            }
+          }
+        }
+      });
+      if (activeDebugDoc) {
+        this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
+      }
+    }
+    handleMessage(message) {
+      if (activeDebugDoc && !this.core.currentDocText) {
+        this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
+      }
+      this.core.handleMessage(message);
+    }
+    dispose() {
+      this._sendMessage.dispose();
+      if (activeDebugAdapter === this) {
+        activeDebugAdapter = null;
+      }
+    }
+  }
   const debugLineDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
     backgroundColor: "rgba(255, 215, 0, 0.22)",
@@ -3809,6 +3917,12 @@ Haz clic para inspeccionar variables en RAM.`;
     if (activeDebugDoc) {
       highlightDebugPosition(activeDebugDoc, line, stmt);
     }
+    if (activeDebugAdapter) {
+      if (activeDebugDoc) {
+        activeDebugAdapter.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
+      }
+      activeDebugAdapter.core.notifyPaused(line, stmt, activeDebugVars);
+    }
   }
   function handleBasicResumed() {
     clearDebugDecorations();
@@ -3817,6 +3931,9 @@ Haz clic para inspeccionar variables en RAM.`;
       debugStatusBarItem.text = "$(play) BASIC: Ejecutando...";
       debugStatusBarItem.tooltip = "Sinclair BASIC en ejecuci\xF3n en Turbo80";
       debugStatusBarItem.show();
+    }
+    if (activeDebugAdapter) {
+      activeDebugAdapter.core.notifyResumed();
     }
   }
   function handleDebugStopped() {
@@ -3829,6 +3946,13 @@ Haz clic para inspeccionar variables en RAM.`;
     debugStatusBarItem.hide();
     vscode.commands.executeCommand("setContext", "sinclairBasic.isDebugging", false);
     vscode.commands.executeCommand("setContext", "sinclairBasic.isPaused", false);
+    if (activeDebugAdapter) {
+      activeDebugAdapter.core.notifyTerminated();
+      activeDebugAdapter = null;
+    }
+    if (vscode.debug.activeDebugSession && vscode.debug.activeDebugSession.type === "sinclair-basic") {
+      vscode.debug.stopDebugging(vscode.debug.activeDebugSession);
+    }
   }
   function runTurbo80Webview(tapBytes, filename, options = {}) {
     const config = vscode.workspace.getConfiguration("sinclairBasic");
@@ -3909,11 +4033,21 @@ Haz clic para inspeccionar variables en RAM.`;
       return;
     }
     if (!res) return;
+    activeDebugDoc = doc;
     const breakpoints = getBreakpointsForDocument(doc);
+    const stopOnEntry = breakpoints.length === 0;
     runTurbo80Webview(res.tapBytes, res.filename, {
       debug: true,
       breakpoints,
-      doc
+      doc,
+      stopOnEntry
+    });
+    await vscode.debug.startDebugging(void 0, {
+      type: "sinclair-basic",
+      name: `Sinclair BASIC: ${res.filename}`,
+      request: "launch",
+      program: doc.fileName,
+      stopOnEntry
     });
   }
   function handleDebugContinue() {
@@ -4456,6 +4590,12 @@ ${shareUrl}`,
     vscode.commands.registerCommand("sinclairBasic.debugStop", handleDebugStop),
     vscode.commands.registerCommand("sinclairBasic.toggleBreakpoint", handleToggleBreakpoint),
     vscode.commands.registerCommand("sinclairBasic.showDebugVariables", handleShowDebugVariables),
+    vscode.debug.registerDebugAdapterDescriptorFactory("sinclair-basic", {
+      createDebugAdapterDescriptor(session) {
+        activeDebugAdapter = new SinclairBasicDebugAdapter(session);
+        return new vscode.DebugAdapterInlineImplementation(activeDebugAdapter);
+      }
+    }),
     vscode.debug.registerDebugConfigurationProvider("sinclair-basic", {
       provideDebugConfigurations() {
         return [
@@ -4466,9 +4606,48 @@ ${shareUrl}`,
           }
         ];
       },
-      resolveDebugConfiguration(folder, config) {
-        handleDebugTurbo80();
-        return void 0;
+      async resolveDebugConfiguration(folder, config) {
+        let program = config.program;
+        if (!program) {
+          const editor = vscode.window.activeTextEditor;
+          if (editor && (editor.document.languageId === "sinclair-basic" || editor.document.languageId === "jbas")) {
+            program = editor.document.fileName;
+          }
+        }
+        if (!program) {
+          vscode.window.showWarningMessage("Please select a .bas or .jbas file to debug.");
+          return void 0;
+        }
+        config.type = "sinclair-basic";
+        config.request = "launch";
+        config.name = config.name || `Sinclair BASIC: ${program.split("/").pop().split("\\").pop()}`;
+        config.program = program;
+        if (!isDebuggingActive) {
+          const editor = vscode.window.activeTextEditor;
+          const doc = editor && editor.document.fileName === program ? editor.document : await vscode.workspace.openTextDocument(vscode.Uri.parse(program));
+          let res = null;
+          if (program.endsWith(".jbas")) {
+            res = await handleCompileJBas(doc.uri);
+          } else {
+            res = await handleCompileBas(doc.uri);
+          }
+          if (!res) return void 0;
+          activeDebugDoc = doc;
+          const breakpoints = getBreakpointsForDocument(doc);
+          config.stopOnEntry = breakpoints.length === 0;
+          runTurbo80Webview(res.tapBytes, res.filename, {
+            debug: true,
+            breakpoints,
+            doc,
+            stopOnEntry: config.stopOnEntry
+          });
+        }
+        return config;
+      }
+    }),
+    vscode.debug.onDidTerminateDebugSession((session) => {
+      if (session.type === "sinclair-basic") {
+        handleDebugStop();
       }
     }),
     debugStatusBarItem,

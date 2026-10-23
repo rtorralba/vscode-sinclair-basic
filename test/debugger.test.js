@@ -5,7 +5,8 @@ const {
   decodeSinclairFloat,
   readSpectrumVariables,
   findDocumentLine,
-  findStatementRange
+  findStatementRange,
+  SinclairBasicDebugAdapterCore
 } = require('../src/core/debugger.js');
 
 describe('Sinclair BASIC Debugger Engine', () => {
@@ -149,4 +150,122 @@ describe('Sinclair BASIC Debugger Engine', () => {
     });
   });
 
+  describe('SinclairBasicDebugAdapterCore', () => {
+    it('handles initialize, launch, and configurationDone', () => {
+      const events = [];
+      const responses = [];
+      const actions = [];
+
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: (e, b) => events.push({ event: e, body: b }),
+        sendResponse: (r) => responses.push(r),
+        onAction: (a, d) => actions.push({ action: a, data: d })
+      });
+
+      adapter.handleMessage({ seq: 1, type: 'request', command: 'initialize', arguments: {} });
+      assert.strictEqual(responses.length, 1);
+      assert.strictEqual(responses[0].success, true);
+      assert.strictEqual(responses[0].body.supportsConfigurationDoneRequest, true);
+      assert.strictEqual(events.length, 1);
+      assert.strictEqual(events[0].event, 'initialized');
+
+      adapter.handleMessage({ seq: 2, type: 'request', command: 'launch', arguments: { program: '/test/game.bas' } });
+      assert.strictEqual(responses.length, 2);
+      assert.strictEqual(actions[0].action, 'launch');
+      assert.strictEqual(actions[0].data.program, '/test/game.bas');
+
+      adapter.handleMessage({ seq: 3, type: 'request', command: 'configurationDone', arguments: {} });
+      assert.strictEqual(responses.length, 3);
+      assert.strictEqual(actions[1].action, 'configurationDone');
+    });
+
+    it('resolves breakpoints against BASIC document lines', () => {
+      const actions = [];
+      const responses = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: () => {},
+        sendResponse: (r) => responses.push(r),
+        onAction: (a, d) => actions.push({ action: a, data: d })
+      });
+
+      adapter.setDocument('/test/game.bas', '10 LET a=1\n20 LET b=2\n30 PRINT a+b');
+      adapter.handleMessage({
+        seq: 1,
+        type: 'request',
+        command: 'setBreakpoints',
+        arguments: {
+          source: { path: '/test/game.bas' },
+          breakpoints: [{ line: 2 }] // document line 2 is '20 LET b=2'
+        }
+      });
+
+      assert.strictEqual(responses[0].success, true);
+      assert.strictEqual(actions[0].action, 'setBreakpoints');
+      assert.deepStrictEqual(actions[0].data.lines, [20]);
+    });
+
+    it('handles pause notification, stackTrace, scopes, and variables', () => {
+      const events = [];
+      const responses = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: (e, b) => events.push({ event: e, body: b }),
+        sendResponse: (r) => responses.push(r)
+      });
+
+      adapter.setDocument('/test/game.bas', '10 LET a=1\n20 LET b=2: PRINT "HI"\n30 PRINT a+b');
+
+      // Notify paused at line 20, stmt 2
+      adapter.notifyPaused(20, 2, [
+        { name: 'a', type: 'number', value: 1 },
+        { name: 'msg$', type: 'string', value: 'ZX' }
+      ]);
+
+      assert.strictEqual(events.length, 1);
+      assert.strictEqual(events[0].event, 'stopped');
+      assert.strictEqual(events[0].body.threadId, 1);
+
+      // Request threads
+      adapter.handleMessage({ seq: 10, type: 'request', command: 'threads', arguments: {} });
+      assert.strictEqual(responses[0].body.threads[0].id, 1);
+
+      // Request stack trace
+      adapter.handleMessage({ seq: 11, type: 'request', command: 'stackTrace', arguments: { threadId: 1 } });
+      const frames = responses[1].body.stackFrames;
+      assert.strictEqual(frames.length, 1);
+      assert.strictEqual(frames[0].line, 2); // 1-indexed doc line
+      assert.strictEqual(frames[0].name, 'Línea 20 [Sentencia 2]');
+
+      // Request scopes
+      adapter.handleMessage({ seq: 12, type: 'request', command: 'scopes', arguments: { frameId: 1 } });
+      assert.strictEqual(responses[2].body.scopes[0].name, 'Variables en RAM (VARS)');
+
+      // Request variables
+      adapter.handleMessage({ seq: 13, type: 'request', command: 'variables', arguments: { variablesReference: 1000 } });
+      const vars = responses[3].body.variables;
+      assert.strictEqual(vars.length, 2);
+      assert.strictEqual(vars[0].name, 'a');
+      assert.strictEqual(vars[0].value, '1');
+      assert.strictEqual(vars[1].name, 'msg$');
+      assert.strictEqual(vars[1].value, '"ZX"');
+    });
+
+    it('dispatches debugger actions: continue, next, stepIn, pause, disconnect', () => {
+      const actions = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: () => {},
+        sendResponse: () => {},
+        onAction: (a, d) => actions.push(a)
+      });
+
+      adapter.handleMessage({ seq: 1, type: 'request', command: 'continue', arguments: {} });
+      adapter.handleMessage({ seq: 2, type: 'request', command: 'next', arguments: {} });
+      adapter.handleMessage({ seq: 3, type: 'request', command: 'stepIn', arguments: {} });
+      adapter.handleMessage({ seq: 4, type: 'request', command: 'pause', arguments: {} });
+      adapter.handleMessage({ seq: 5, type: 'request', command: 'disconnect', arguments: {} });
+
+      assert.deepStrictEqual(actions, ['continue', 'stepLine', 'stepStmt', 'pause', 'stop']);
+    });
+  });
+
 });
+

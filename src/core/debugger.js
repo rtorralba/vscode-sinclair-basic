@@ -195,11 +195,300 @@ function findStatementRange(lineText, stmtIndex) {
   return { startCol: codeStart, endCol: lineText.length };
 }
 
+/**
+ * Core Debug Adapter Protocol (DAP) message handler for Sinclair BASIC.
+ * Pure JavaScript, zero VS Code API dependencies.
+ */
+class SinclairBasicDebugAdapterCore {
+  constructor(options = {}) {
+    this.sendEvent = options.sendEvent || (() => {});
+    this.sendResponse = options.sendResponse || (() => {});
+    this.onAction = options.onAction || (() => {});
+
+    this.seq = 1;
+    this.currentLine = null;
+    this.currentStmt = null;
+    this.currentVars = [];
+    this.currentDocText = '';
+    this.currentFilePath = '';
+    this.breakpoints = new Map();
+  }
+
+  setDocument(filePath, docText) {
+    this.currentFilePath = filePath || '';
+    this.currentDocText = docText || '';
+  }
+
+  handleMessage(message) {
+    if (!message) return;
+    if (message.type === 'request') {
+      this.handleRequest(message);
+    }
+  }
+
+  _sendSuccess(request, body = {}) {
+    this.sendResponse({
+      seq: this.seq++,
+      type: 'response',
+      request_seq: request.seq,
+      command: request.command,
+      success: true,
+      body: body
+    });
+  }
+
+  _sendError(request, message) {
+    this.sendResponse({
+      seq: this.seq++,
+      type: 'response',
+      request_seq: request.seq,
+      command: request.command,
+      success: false,
+      message: message
+    });
+  }
+
+  handleRequest(request) {
+    const { command, arguments: args = {} } = request;
+
+    switch (command) {
+      case 'initialize': {
+        this._sendSuccess(request, {
+          supportsConfigurationDoneRequest: true,
+          supportsRestartRequest: true,
+          supportsTerminateRequest: true,
+          supportsConditionalBreakpoints: false,
+          supportsHitConditionalBreakpoints: false,
+          supportsSetVariable: false,
+          supportsStepBack: false,
+          supportsStepInTargetsRequest: false
+        });
+        this.sendEvent('initialized', {});
+        break;
+      }
+
+      case 'launch': {
+        if (args.program) {
+          this.currentFilePath = args.program;
+        }
+        this.onAction('launch', args);
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'setBreakpoints': {
+        const sourcePath = (args.source && (args.source.path || args.source.name)) || '';
+        const clientBreakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
+        const basicLines = [];
+
+        const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+        for (const bp of clientBreakpoints) {
+          const docLine0 = bp.line - 1;
+          if (docLine0 >= 0 && docLine0 < lines.length) {
+            const m = lines[docLine0].match(/^\s*(\d+)/);
+            if (m) {
+              basicLines.push(parseInt(m[1], 10));
+            } else {
+              basicLines.push(bp.line);
+            }
+          } else {
+            basicLines.push(bp.line);
+          }
+        }
+
+        this.breakpoints.set(sourcePath, new Set(basicLines));
+        this.onAction('setBreakpoints', {
+          sourcePath,
+          lines: basicLines,
+          rawBreakpoints: clientBreakpoints
+        });
+
+        this._sendSuccess(request, {
+          breakpoints: clientBreakpoints.map(bp => ({
+            verified: true,
+            line: bp.line
+          }))
+        });
+        break;
+      }
+
+      case 'setExceptionBreakpoints': {
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'configurationDone': {
+        this.onAction('configurationDone', {});
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'threads': {
+        this._sendSuccess(request, {
+          threads: [
+            { id: 1, name: 'ZX Spectrum 48K (Sinclair BASIC)' }
+          ]
+        });
+        break;
+      }
+
+      case 'stackTrace': {
+        const frames = [];
+        if (this.currentLine != null) {
+          const docLine0 = findDocumentLine(this.currentDocText, this.currentLine);
+          const docLine1 = docLine0 >= 0 ? (docLine0 + 1) : 1;
+          const lineText = (docLine0 >= 0 && this.currentDocText)
+            ? this.currentDocText.split(/\r?\n/)[docLine0]
+            : '';
+          const stmtRange = findStatementRange(lineText, this.currentStmt || 1);
+
+          const fileName = this.currentFilePath
+            ? this.currentFilePath.replace(/\\/g, '/').split('/').pop()
+            : 'program.bas';
+
+          frames.push({
+            id: 1,
+            name: `Línea ${this.currentLine} [Sentencia ${this.currentStmt || 1}]`,
+            source: {
+              name: fileName,
+              path: this.currentFilePath
+            },
+            line: docLine1,
+            column: stmtRange.startCol + 1,
+            endColumn: stmtRange.endCol + 1
+          });
+        }
+
+        this._sendSuccess(request, {
+          stackFrames: frames,
+          totalFrames: frames.length
+        });
+        break;
+      }
+
+      case 'scopes': {
+        this._sendSuccess(request, {
+          scopes: [
+            {
+              name: 'Variables en RAM (VARS)',
+              presentationHint: 'locals',
+              variablesReference: 1000,
+              expensive: false
+            }
+          ]
+        });
+        break;
+      }
+
+      case 'variables': {
+        const dapVars = (this.currentVars || []).map(v => {
+          let valStr = '';
+          if (v.type === 'string') {
+            valStr = `"${v.value}"`;
+          } else if (v.type === 'for') {
+            valStr = `${v.value} (TO ${v.limit} STEP ${v.step})`;
+          } else {
+            valStr = String(v.value);
+          }
+          return {
+            name: v.name,
+            value: valStr,
+            type: v.type,
+            variablesReference: 0
+          };
+        });
+
+        this._sendSuccess(request, {
+          variables: dapVars
+        });
+        break;
+      }
+
+      case 'continue': {
+        this.onAction('continue', {});
+        this._sendSuccess(request, { allThreadsContinued: true });
+        this.sendEvent('continued', { threadId: 1, allThreadsContinued: true });
+        break;
+      }
+
+      case 'pause': {
+        this.onAction('pause', {});
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'next': {
+        this.onAction('stepLine', {});
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'stepIn': {
+        this.onAction('stepStmt', {});
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'stepOut': {
+        this.onAction('stepLine', {});
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'restart': {
+        this.onAction('restart', {});
+        this._sendSuccess(request, {});
+        break;
+      }
+
+      case 'disconnect':
+      case 'terminate': {
+        this.onAction('stop', {});
+        this._sendSuccess(request, {});
+        this.sendEvent('terminated', {});
+        this.sendEvent('exited', { exitCode: 0 });
+        break;
+      }
+
+      default: {
+        this._sendSuccess(request, {});
+        break;
+      }
+    }
+  }
+
+  notifyPaused(line, stmt, vars, reason = 'breakpoint') {
+    this.currentLine = line;
+    this.currentStmt = stmt;
+    this.currentVars = Array.isArray(vars) ? vars : [];
+    this.sendEvent('stopped', {
+      reason: reason,
+      threadId: 1,
+      allThreadsStopped: true,
+      description: `Línea ${line}, Sentencia ${stmt}`
+    });
+  }
+
+  notifyResumed() {
+    this.sendEvent('continued', {
+      threadId: 1,
+      allThreadsContinued: true
+    });
+  }
+
+  notifyTerminated() {
+    this.sendEvent('terminated', {});
+    this.sendEvent('exited', { exitCode: 0 });
+  }
+}
+
 module.exports = {
   ROM48_STMT_ADDR,
   ROM48_LOOP_ADDR,
   decodeSinclairFloat,
   readSpectrumVariables,
   findDocumentLine,
-  findStatementRange
+  findStatementRange,
+  SinclairBasicDebugAdapterCore
 };
+

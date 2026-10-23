@@ -42,145 +42,6 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       display: flex;
       flex-direction: column;
     }
-    /* Sinclair BASIC Debugger Bar */
-    #debug-bar {
-      height: 38px;
-      background: #141420;
-      border-bottom: 1px solid #2a2a3e;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 1rem;
-      font-size: 12px;
-      color: #e9e9f2;
-      user-select: none;
-      flex-shrink: 0;
-      z-index: 1000;
-    }
-    .dbg-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-    }
-    .dbg-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
-    .dbg-badge.running {
-      background: rgba(87, 239, 158, 0.15);
-      color: #57ef9e;
-      border: 1px solid rgba(87, 239, 158, 0.4);
-    }
-    .dbg-badge.paused {
-      background: rgba(255, 204, 0, 0.2);
-      color: #ffcc00;
-      border: 1px solid rgba(255, 204, 0, 0.6);
-      box-shadow: 0 0 8px rgba(255, 204, 0, 0.3);
-    }
-    .dbg-pos {
-      color: #b0b0c8;
-      font-size: 11.5px;
-    }
-    .dbg-actions {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .dbg-btn {
-      background: #1c1c2a;
-      color: #e2e2ee;
-      border: 1px solid #36364e;
-      border-radius: 4px;
-      padding: 3px 8px;
-      font-size: 11.5px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: background 0.15s, border-color 0.15s;
-    }
-    .dbg-btn:hover {
-      background: #2a2a40;
-      border-color: #5c5c8a;
-    }
-    .dbg-btn.primary {
-      background: #1e3355;
-      border-color: #37d0ff;
-      color: #ffffff;
-    }
-    .dbg-btn.primary:hover {
-      background: #284472;
-    }
-    .dbg-btn.danger {
-      background: #3e1b24;
-      border-color: #ff4766;
-      color: #ffffff;
-    }
-    .dbg-btn.danger:hover {
-      background: #552531;
-    }
-    #debug-vars-drawer {
-      position: absolute;
-      bottom: 34px;
-      left: 0;
-      right: 0;
-      max-height: 180px;
-      background: rgba(18, 18, 26, 0.96);
-      backdrop-filter: blur(8px);
-      border-top: 1px solid #323248;
-      display: flex;
-      flex-direction: column;
-      z-index: 1000;
-    }
-    .dbg-vars-header {
-      height: 28px;
-      background: #14141e;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 12px;
-      font-size: 11px;
-      font-weight: 600;
-      color: #9b9bb0;
-      border-bottom: 1px solid #28283a;
-    }
-    .dbg-vars-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 6px;
-      padding: 8px 12px;
-      overflow-y: auto;
-      max-height: 140px;
-      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-      font-size: 12px;
-    }
-    .dbg-var-card {
-      background: #181826;
-      padding: 4px 8px;
-      border-radius: 4px;
-      border: 1px solid #2d2d42;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .dbg-var-name {
-      color: #37d0ff;
-      font-weight: 600;
-    }
-    .dbg-var-val {
-      color: #57ef9e;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 90px;
-    }
     #emulator-wrap {
       flex: 1;
       min-height: 0;
@@ -252,34 +113,8 @@ function getTurbo80Html(webview, extensionUri, vscode) {
   </style>
 </head>
 <body>
-  <div id="debug-bar" style="display: none;">
-    <div class="dbg-left">
-      <span class="dbg-badge running" id="dbg-status-badge">● EJECUTANDO</span>
-      <span class="dbg-pos" id="dbg-pos">Línea --, Sent. --</span>
-    </div>
-    <div class="dbg-actions">
-      <button class="dbg-btn primary" id="btn-dbg-continue" title="Continuar ejecución (F5)">▶ Continuar</button>
-      <button class="dbg-btn" id="btn-dbg-pause" title="Pausar ejecución (F6)" style="display: none;">⏸ Pausar</button>
-      <button class="dbg-btn" id="btn-dbg-stepline" title="Paso de Línea (F10)">↷ Línea</button>
-      <button class="dbg-btn" id="btn-dbg-stepstmt" title="Paso de Sentencia (F11)">⇲ Sentencia</button>
-      <button class="dbg-btn" id="btn-dbg-restart" title="Reiniciar desde la línea 1">🔄 Reiniciar</button>
-      <button class="dbg-btn danger" id="btn-dbg-stop" title="Detener depuración">⏹ Detener</button>
-    </div>
-    <div class="dbg-right">
-      <button class="dbg-btn" id="btn-dbg-toggle-vars" title="Inspeccionar variables en memoria RAM">📋 Variables (<span id="dbg-var-count">0</span>)</button>
-    </div>
-  </div>
   <div id="emulator-wrap">
     <div id="spectrum" style="width: 100%;"></div>
-    <div id="debug-vars-drawer" style="display: none;">
-      <div class="dbg-vars-header">
-        <span>Variables en memoria (ZX Spectrum RAM)</span>
-        <button class="dbg-btn" id="btn-close-vars" style="padding: 1px 6px;">✕</button>
-      </div>
-      <div class="dbg-vars-grid" id="dbg-vars-list">
-        <div style="color: #727288; grid-column: 1/-1; padding: 6px 0;">Sin variables asignadas en RAM</div>
-      </div>
-    </div>
   </div>
   <footer id="footer">
     <div class="status-badge">
@@ -601,7 +436,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
         this.lastPausedStmt = stmt;
         this.vars = readSpectrumVariables(a => spectrum.memory.read(a));
 
-        updateDebugUI('paused', line, stmt, this.vars);
+        updateFooterStatus('paused', line, stmt);
         vscode.postMessage({
           command: 'basicPaused',
           line: line,
@@ -611,49 +446,31 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       }
     };
 
-    function updateDebugUI(status, line, stmt, vars) {
-      const bar = document.getElementById('debug-bar');
-      const badge = document.getElementById('dbg-status-badge');
-      const pos = document.getElementById('dbg-pos');
-      const varCount = document.getElementById('dbg-var-count');
-      const varsList = document.getElementById('dbg-vars-list');
+    function updateFooterStatus(status, line, stmt) {
+      const title = document.getElementById('game-title');
+      const dot = document.querySelector('.status-dot');
+      if (!title) return;
 
       if (!basicDebugger.enabled) {
-        bar.style.display = 'none';
+        if (dot) {
+          dot.style.background = '#57ef9e';
+          dot.style.boxShadow = '0 0 8px rgba(87, 239, 158, 0.7)';
+        }
         return;
       }
 
-      bar.style.display = 'flex';
-
       if (status === 'paused') {
-        badge.className = 'dbg-badge paused';
-        badge.textContent = '● PAUSADO';
-        pos.textContent = 'Línea ' + line + ', Sent. ' + stmt;
-        document.getElementById('btn-dbg-continue').style.display = 'inline-flex';
-        document.getElementById('btn-dbg-pause').style.display = 'none';
+        if (dot) {
+          dot.style.background = '#ffcc00';
+          dot.style.boxShadow = '0 0 8px rgba(255, 204, 0, 0.8)';
+        }
+        title.textContent = (pendingData && pendingData.filename ? pendingData.filename + ' — ' : '') + 'Pausado (Línea ' + line + ', Sent. ' + stmt + ')';
       } else {
-        badge.className = 'dbg-badge running';
-        badge.textContent = '● EJECUTANDO';
-        if (line != null) {
-          pos.textContent = 'Línea ' + line + '...';
+        if (dot) {
+          dot.style.background = '#57ef9e';
+          dot.style.boxShadow = '0 0 8px rgba(87, 239, 158, 0.7)';
         }
-        document.getElementById('btn-dbg-continue').style.display = 'none';
-        document.getElementById('btn-dbg-pause').style.display = 'inline-flex';
-      }
-
-      if (vars) {
-        varCount.textContent = vars.length;
-        if (vars.length === 0) {
-          varsList.innerHTML = '<div style="color: #727288; grid-column: 1/-1; padding: 6px 0;">Sin variables asignadas en RAM</div>';
-        } else {
-          varsList.innerHTML = vars.map(v => {
-            const valStr = v.type === 'string' ? '"' + v.value + '"' : String(v.value);
-            return '<div class="dbg-var-card" title="' + v.name + ' (' + v.type + ') = ' + valStr + '">' +
-              '<span class="dbg-var-name">' + v.name + '</span>' +
-              '<span class="dbg-var-val">' + valStr + '</span>' +
-            '</div>';
-          }).join('');
-        }
+        title.textContent = (pendingData && pendingData.filename) ? pendingData.filename : 'ZX Spectrum';
       }
     }
 
@@ -661,7 +478,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       if (emulator) {
         basicDebugger.stepMode = null;
         basicDebugger.pauseRequested = false;
-        updateDebugUI('running');
+        updateFooterStatus('running');
         vscode.postMessage({ command: 'basicResumed' });
         emulator.resume();
       }
@@ -675,7 +492,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       if (emulator) {
         basicDebugger.stepMode = 'line';
         basicDebugger.lastLine = basicDebugger.lastPausedLine;
-        updateDebugUI('running', basicDebugger.lastPausedLine);
+        updateFooterStatus('running');
         vscode.postMessage({ command: 'basicResumed' });
         emulator.resume();
       }
@@ -686,7 +503,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
         basicDebugger.stepMode = 'stmt';
         basicDebugger.lastLine = basicDebugger.lastPausedLine;
         basicDebugger.lastStmt = basicDebugger.lastPausedStmt;
-        updateDebugUI('running', basicDebugger.lastPausedLine);
+        updateFooterStatus('running');
         vscode.postMessage({ command: 'basicResumed' });
         emulator.resume();
       }
@@ -701,26 +518,10 @@ function getTurbo80Html(webview, extensionUri, vscode) {
 
     function doStop() {
       basicDebugger.enabled = false;
-      document.getElementById('debug-bar').style.display = 'none';
-      document.getElementById('debug-vars-drawer').style.display = 'none';
+      updateFooterStatus('running');
       vscode.postMessage({ command: 'debugStopped' });
       if (emulator) emulator.resume();
     }
-
-    document.getElementById('btn-dbg-continue').onclick = doContinue;
-    document.getElementById('btn-dbg-pause').onclick = doPause;
-    document.getElementById('btn-dbg-stepline').onclick = doStepLine;
-    document.getElementById('btn-dbg-stepstmt').onclick = doStepStmt;
-    document.getElementById('btn-dbg-restart').onclick = doRestart;
-    document.getElementById('btn-dbg-stop').onclick = doStop;
-
-    document.getElementById('btn-dbg-toggle-vars').onclick = function () {
-      const drawer = document.getElementById('debug-vars-drawer');
-      drawer.style.display = (drawer.style.display === 'none') ? 'flex' : 'none';
-    };
-    document.getElementById('btn-close-vars').onclick = function () {
-      document.getElementById('debug-vars-drawer').style.display = 'none';
-    };
 
     window.addEventListener('keydown', function (e) {
       if (!basicDebugger.enabled) return;
@@ -751,10 +552,10 @@ function getTurbo80Html(webview, extensionUri, vscode) {
           if (msg.stopOnEntry || basicDebugger.breakpoints.size === 0) {
             basicDebugger.pauseRequested = true;
           }
-          updateDebugUI(basicDebugger.pauseRequested ? 'paused' : 'running', 1, 1, []);
+          updateFooterStatus(basicDebugger.pauseRequested ? 'paused' : 'running', 1, 1);
         } else {
           basicDebugger.enabled = false;
-          updateDebugUI();
+          updateFooterStatus('running');
         }
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
           applyTap(msg);

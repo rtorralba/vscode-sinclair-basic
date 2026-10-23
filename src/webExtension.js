@@ -15,7 +15,8 @@ const { findBasJumpTargetAtPosition, findBasLineIndex } = require('./core/defini
 const { uploadTapToHost, buildTurbo80ShareUrl } = require('./core/share');
 const {
   findDocumentLine,
-  findStatementRange
+  findStatementRange,
+  SinclairBasicDebugAdapterCore
 } = require('./core/debugger');
 const { getTurbo80Html } = require('./core/turbo80Html');
 
@@ -157,6 +158,68 @@ function activate(context) {
   let activeDebugStmt = null;
   let activeDebugVars = [];
   let isDebuggingActive = false;
+  let activeDebugAdapter = null;
+
+  class SinclairBasicDebugAdapter {
+    constructor(session) {
+      this._sendMessage = new vscode.EventEmitter();
+      this.onDidSendMessage = this._sendMessage.event;
+      this.session = session;
+
+      this.core = new SinclairBasicDebugAdapterCore({
+        sendEvent: (event, body) => {
+          this._sendMessage.fire({
+            type: 'event',
+            event: event,
+            body: body
+          });
+        },
+        sendResponse: (response) => {
+          this._sendMessage.fire(response);
+        },
+        onAction: (action, data) => {
+          if (action === 'continue') {
+            handleDebugContinue();
+          } else if (action === 'pause') {
+            handleDebugPause();
+          } else if (action === 'stepLine') {
+            handleDebugStepLine();
+          } else if (action === 'stepStmt') {
+            handleDebugStepStmt();
+          } else if (action === 'restart') {
+            handleDebugRestart();
+          } else if (action === 'stop') {
+            handleDebugStop();
+          } else if (action === 'setBreakpoints') {
+            if (currentTurbo80Panel) {
+              currentTurbo80Panel.webview.postMessage({
+                command: 'setBreakpoints',
+                breakpoints: data.lines
+              });
+            }
+          }
+        }
+      });
+
+      if (activeDebugDoc) {
+        this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
+      }
+    }
+
+    handleMessage(message) {
+      if (activeDebugDoc && !this.core.currentDocText) {
+        this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
+      }
+      this.core.handleMessage(message);
+    }
+
+    dispose() {
+      this._sendMessage.dispose();
+      if (activeDebugAdapter === this) {
+        activeDebugAdapter = null;
+      }
+    }
+  }
 
   const debugLineDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
@@ -244,6 +307,13 @@ function activate(context) {
     if (activeDebugDoc) {
       highlightDebugPosition(activeDebugDoc, line, stmt);
     }
+
+    if (activeDebugAdapter) {
+      if (activeDebugDoc) {
+        activeDebugAdapter.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
+      }
+      activeDebugAdapter.core.notifyPaused(line, stmt, activeDebugVars);
+    }
   }
 
   function handleBasicResumed() {
@@ -253,6 +323,9 @@ function activate(context) {
       debugStatusBarItem.text = '$(play) BASIC: Ejecutando...';
       debugStatusBarItem.tooltip = 'Sinclair BASIC en ejecución en Turbo80';
       debugStatusBarItem.show();
+    }
+    if (activeDebugAdapter) {
+      activeDebugAdapter.core.notifyResumed();
     }
   }
 
@@ -266,6 +339,14 @@ function activate(context) {
     debugStatusBarItem.hide();
     vscode.commands.executeCommand('setContext', 'sinclairBasic.isDebugging', false);
     vscode.commands.executeCommand('setContext', 'sinclairBasic.isPaused', false);
+
+    if (activeDebugAdapter) {
+      activeDebugAdapter.core.notifyTerminated();
+      activeDebugAdapter = null;
+    }
+    if (vscode.debug.activeDebugSession && vscode.debug.activeDebugSession.type === 'sinclair-basic') {
+      vscode.debug.stopDebugging(vscode.debug.activeDebugSession);
+    }
   }
 
   function runTurbo80Webview(tapBytes, filename, options = {}) {
@@ -356,11 +437,22 @@ function activate(context) {
     }
     if (!res) return;
 
+    activeDebugDoc = doc;
     const breakpoints = getBreakpointsForDocument(doc);
+    const stopOnEntry = (breakpoints.length === 0);
     runTurbo80Webview(res.tapBytes, res.filename, {
       debug: true,
       breakpoints,
-      doc
+      doc,
+      stopOnEntry
+    });
+
+    await vscode.debug.startDebugging(undefined, {
+      type: 'sinclair-basic',
+      name: `Sinclair BASIC: ${res.filename}`,
+      request: 'launch',
+      program: doc.fileName,
+      stopOnEntry
     });
   }
 
@@ -997,6 +1089,12 @@ function activate(context) {
     vscode.commands.registerCommand('sinclairBasic.debugStop', handleDebugStop),
     vscode.commands.registerCommand('sinclairBasic.toggleBreakpoint', handleToggleBreakpoint),
     vscode.commands.registerCommand('sinclairBasic.showDebugVariables', handleShowDebugVariables),
+    vscode.debug.registerDebugAdapterDescriptorFactory('sinclair-basic', {
+      createDebugAdapterDescriptor(session) {
+        activeDebugAdapter = new SinclairBasicDebugAdapter(session);
+        return new vscode.DebugAdapterInlineImplementation(activeDebugAdapter);
+      }
+    }),
     vscode.debug.registerDebugConfigurationProvider('sinclair-basic', {
       provideDebugConfigurations() {
         return [
@@ -1007,9 +1105,52 @@ function activate(context) {
           }
         ];
       },
-      resolveDebugConfiguration(folder, config) {
-        handleDebugTurbo80();
-        return undefined;
+      async resolveDebugConfiguration(folder, config) {
+        let program = config.program;
+        if (!program) {
+          const editor = vscode.window.activeTextEditor;
+          if (editor && (editor.document.languageId === 'sinclair-basic' || editor.document.languageId === 'jbas')) {
+            program = editor.document.fileName;
+          }
+        }
+        if (!program) {
+          vscode.window.showWarningMessage('Please select a .bas or .jbas file to debug.');
+          return undefined;
+        }
+        config.type = 'sinclair-basic';
+        config.request = 'launch';
+        config.name = config.name || `Sinclair BASIC: ${program.split('/').pop().split('\\').pop()}`;
+        config.program = program;
+
+        if (!isDebuggingActive) {
+          const editor = vscode.window.activeTextEditor;
+          const doc = (editor && editor.document.fileName === program)
+            ? editor.document
+            : await vscode.workspace.openTextDocument(vscode.Uri.parse(program));
+
+          let res = null;
+          if (program.endsWith('.jbas')) {
+            res = await handleCompileJBas(doc.uri);
+          } else {
+            res = await handleCompileBas(doc.uri);
+          }
+          if (!res) return undefined;
+          activeDebugDoc = doc;
+          const breakpoints = getBreakpointsForDocument(doc);
+          config.stopOnEntry = (breakpoints.length === 0);
+          runTurbo80Webview(res.tapBytes, res.filename, {
+            debug: true,
+            breakpoints,
+            doc,
+            stopOnEntry: config.stopOnEntry
+          });
+        }
+        return config;
+      }
+    }),
+    vscode.debug.onDidTerminateDebugSession(session => {
+      if (session.type === 'sinclair-basic') {
+        handleDebugStop();
       }
     }),
     debugStatusBarItem,
