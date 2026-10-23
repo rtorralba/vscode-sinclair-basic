@@ -290,20 +290,16 @@ function mapBasicToSourceLine(basicLine, basicToSource) {
 }
 
 /**
- * Finds the character range [startCol, endCol] of a given 1-based statement on a BASIC line.
- * Statements are separated by colons ':' that are outside string literals and REM comments.
+ * Returns all statement ranges [startCol, endCol] for a BASIC or JBAS line.
  *
- * @param {string} lineText The text of the specific line (e.g. '74 LET a=1: LET b=2')
- * @param {number} stmtIndex 1-based statement index
- * @returns {{ startCol: number, endCol: number }}
+ * @param {string} lineText
+ * @returns {Array<{ stmtIndex: number, startCol: number, endCol: number }>}
  */
-function findStatementRange(lineText, stmtIndex) {
-  if (typeof lineText !== 'string') return { startCol: 0, endCol: 0 };
-  
-  // Find start of BASIC code past the line number, @label:, or leading whitespace
+function getStatementRanges(lineText) {
+  if (typeof lineText !== 'string') return [];
   const prefixMatch = lineText.match(/^(\s*@[a-zA-Z0-9_]+:\s*|\s*\d+\s*|\s*)/);
   const codeStart = prefixMatch ? prefixMatch[0].length : 0;
-  
+
   let inString = false;
   let inRem = false;
   const segments = [];
@@ -314,26 +310,60 @@ function findStatementRange(lineText, stmtIndex) {
     if (ch === '"') {
       inString = !inString;
     } else if (!inString && !inRem) {
-      // Check for REM
       if (lineText.slice(i, i + 3).toUpperCase() === 'REM' &&
           (i === codeStart || /\s|:/.test(lineText[i - 1]))) {
         inRem = true;
       } else if (ch === ':') {
-        segments.push({ startCol: segStart, endCol: i });
+        segments.push({ stmtIndex: segments.length + 1, startCol: segStart, endCol: i });
         segStart = i + 1;
-        // Skip leading space after colon
         if (lineText[segStart] === ' ') segStart++;
       }
     }
   }
-  // Push the final statement segment
-  segments.push({ startCol: segStart, endCol: lineText.length });
+  segments.push({ stmtIndex: segments.length + 1, startCol: segStart, endCol: lineText.length });
+  return segments;
+}
 
+/**
+ * Finds the character range [startCol, endCol] of a given 1-based statement on a BASIC line.
+ * Statements are separated by colons ':' that are outside string literals and REM comments.
+ *
+ * @param {string} lineText The text of the specific line (e.g. '74 LET a=1: LET b=2')
+ * @param {number} stmtIndex 1-based statement index
+ * @returns {{ startCol: number, endCol: number }}
+ */
+function findStatementRange(lineText, stmtIndex) {
+  const segments = getStatementRanges(lineText);
   const idx = Math.max(1, stmtIndex) - 1;
   if (idx < segments.length) {
-    return segments[idx];
+    return { startCol: segments[idx].startCol, endCol: segments[idx].endCol };
   }
-  return { startCol: codeStart, endCol: lineText.length };
+  const prefixMatch = (typeof lineText === 'string') ? lineText.match(/^(\s*@[a-zA-Z0-9_]+:\s*|\s*\d+\s*|\s*)/) : null;
+  const codeStart = prefixMatch ? prefixMatch[0].length : 0;
+  return { startCol: codeStart, endCol: lineText ? lineText.length : 0 };
+}
+
+/**
+ * Finds the 1-based statement index for a given 1-based column on a line.
+ * If column is not specified or at/before statement 1, returns 1.
+ *
+ * @param {string} lineText
+ * @param {number} [column1] 1-based column
+ * @returns {number} 1-based statement index
+ */
+function findStatementIndexAtColumn(lineText, column1) {
+  if (!column1 || column1 <= 1) return 1;
+  const col0 = column1 - 1;
+  const ranges = getStatementRanges(lineText);
+  for (const r of ranges) {
+    if (col0 >= r.startCol && col0 <= r.endCol) {
+      return r.stmtIndex;
+    }
+  }
+  if (ranges.length > 0 && col0 > ranges[ranges.length - 1].endCol) {
+    return ranges[ranges.length - 1].stmtIndex;
+  }
+  return 1;
 }
 
 /**
@@ -403,6 +433,7 @@ class SinclairBasicDebugAdapterCore {
           supportsConfigurationDoneRequest: true,
           supportsRestartRequest: true,
           supportsTerminateRequest: true,
+          supportsBreakpointLocationsRequest: true,
           supportsConditionalBreakpoints: false,
           supportsHitConditionalBreakpoints: false,
           supportsSetVariable: false,
@@ -422,47 +453,85 @@ class SinclairBasicDebugAdapterCore {
         break;
       }
 
-      case 'setBreakpoints': {
-        const sourcePath = (args.source && (args.source.path || args.source.name)) || '';
-        const clientBreakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
-        const basicLines = [];
+      case 'breakpointLocations': {
+        const line = args.line;
+        const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+        const docLine0 = line - 1;
+        const locations = [];
 
-        if (this.sourceMap && this.sourceMap.sourceToBasic) {
-          for (const bp of clientBreakpoints) {
-            const mapped = mapSourceLineToBasic(bp.line, this.sourceMap.sourceToBasic);
-            if (mapped !== null && mapped !== undefined) {
-              basicLines.push(mapped);
-            }
-          }
-        } else {
-          const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
-          for (const bp of clientBreakpoints) {
-            const docLine0 = bp.line - 1;
-            if (docLine0 >= 0 && docLine0 < lines.length) {
-              const m = lines[docLine0].match(/^\s*(\d+)/);
-              if (m) {
-                basicLines.push(parseInt(m[1], 10));
-              } else {
-                basicLines.push(bp.line);
-              }
-            } else {
-              basicLines.push(bp.line);
-            }
+        if (docLine0 >= 0 && docLine0 < lines.length) {
+          const lineText = lines[docLine0];
+          const ranges = getStatementRanges(lineText);
+          for (const r of ranges) {
+            locations.push({
+              line: line,
+              column: r.startCol + 1
+            });
           }
         }
 
-        this.breakpoints.set(sourcePath, new Set(basicLines));
+        this._sendSuccess(request, {
+          breakpoints: locations.length > 0 ? locations : [{ line: line, column: 1 }]
+        });
+        break;
+      }
+
+      case 'setBreakpoints': {
+        const sourcePath = (args.source && (args.source.path || args.source.name)) || '';
+        const clientBreakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
+        const targetBreakpoints = [];
+        const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+
+        for (const bp of clientBreakpoints) {
+          const docLine0 = bp.line - 1;
+          const lineText = (docLine0 >= 0 && docLine0 < lines.length) ? lines[docLine0] : '';
+          const stmtIndex = findStatementIndexAtColumn(lineText, bp.column);
+
+          let basicLine = null;
+          if (this.sourceMap && this.sourceMap.sourceToBasic) {
+            basicLine = mapSourceLineToBasic(bp.line, this.sourceMap.sourceToBasic);
+          } else {
+            if (docLine0 >= 0 && docLine0 < lines.length) {
+              const m = lines[docLine0].match(/^\s*(\d+)/);
+              if (m) {
+                basicLine = parseInt(m[1], 10);
+              } else {
+                basicLine = bp.line;
+              }
+            } else {
+              basicLine = bp.line;
+            }
+          }
+
+          if (basicLine !== null && basicLine !== undefined) {
+            targetBreakpoints.push({
+              line: basicLine,
+              stmt: stmtIndex
+            });
+          }
+        }
+
+        this.breakpoints.set(sourcePath, targetBreakpoints);
         this.onAction('setBreakpoints', {
           sourcePath,
-          lines: basicLines,
+          breakpoints: targetBreakpoints,
+          lines: targetBreakpoints.map(b => b.line),
           rawBreakpoints: clientBreakpoints
         });
 
         this._sendSuccess(request, {
-          breakpoints: clientBreakpoints.map(bp => ({
-            verified: true,
-            line: bp.line
-          }))
+          breakpoints: clientBreakpoints.map(bp => {
+            const docLine0 = bp.line - 1;
+            const lineText = (docLine0 >= 0 && docLine0 < lines.length) ? lines[docLine0] : '';
+            const stmtIndex = findStatementIndexAtColumn(lineText, bp.column);
+            const ranges = getStatementRanges(lineText);
+            const r = ranges[stmtIndex - 1];
+            return {
+              verified: true,
+              line: bp.line,
+              column: r ? (r.startCol + 1) : (bp.column || 1)
+            };
+          })
         });
         break;
       }
@@ -686,6 +755,8 @@ module.exports = {
   readSpectrumVariables,
   findDocumentLine,
   findStatementRange,
+  getStatementRanges,
+  findStatementIndexAtColumn,
   SinclairBasicDebugAdapterCore,
   decodeSpectrumString,
   mapSourceLineToBasic,

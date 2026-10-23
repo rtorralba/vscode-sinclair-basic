@@ -437,7 +437,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
     const basicDebugger = {
       enabled: false,
       attached: false,
-      breakpoints: new Set(),
+      breakpoints: new Map(),
       stepMode: null,
       pauseRequested: false,
       lastLine: null,
@@ -445,6 +445,28 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       lastPausedLine: null,
       lastPausedStmt: null,
       vars: [],
+
+      setBreakpoints(bps) {
+        this.breakpoints = new Map();
+        if (Array.isArray(bps)) {
+          for (const bp of bps) {
+            let line, stmt;
+            if (typeof bp === 'number') {
+              line = bp;
+              stmt = 1;
+            } else if (bp && typeof bp === 'object') {
+              line = bp.line;
+              stmt = (typeof bp.stmt === 'number') ? bp.stmt : 1;
+            }
+            if (typeof line === 'number') {
+              if (!this.breakpoints.has(line)) {
+                this.breakpoints.set(line, new Set());
+              }
+              this.breakpoints.get(line).add(stmt);
+            }
+          }
+        }
+      },
 
       attach(sp) {
         if (!sp || this.attached) return;
@@ -485,12 +507,15 @@ function getTurbo80Html(webview, extensionUri, vscode) {
             return true;
           }
 
-          if (this.breakpoints.has(line)) {
-            if (line === this.lastPausedLine && stmt === this.lastPausedStmt) {
-              return false;
+          const stmtSet = this.breakpoints.get(line);
+          if (stmtSet) {
+            if (stmtSet.has(stmt) || stmtSet.has(0)) {
+              if (line === this.lastPausedLine && stmt === this.lastPausedStmt) {
+                return false;
+              }
+              this.onBreakHit(line, stmt, spectrum);
+              return true;
             }
-            this.onBreakHit(line, stmt, spectrum);
-            return true;
           }
 
           return false;
@@ -612,9 +637,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
         pendingData = msg;
         if (msg.debug) {
           basicDebugger.enabled = true;
-          if (Array.isArray(msg.breakpoints)) {
-            basicDebugger.breakpoints = new Set(msg.breakpoints);
-          }
+          basicDebugger.setBreakpoints(msg.breakpoints);
           if (msg.stopOnEntry || basicDebugger.breakpoints.size === 0) {
             basicDebugger.pauseRequested = true;
           }
@@ -630,7 +653,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
         }
       } else if (msg.command === 'setBreakpoints') {
         const bps = Array.isArray(msg.breakpoints) ? msg.breakpoints : (Array.isArray(msg.lines) ? msg.lines : []);
-        basicDebugger.breakpoints = new Set(bps);
+        basicDebugger.setBreakpoints(bps);
       } else if (msg.command === 'debugContinue') {
         doContinue();
       } else if (msg.command === 'debugPause') {

@@ -6,6 +6,8 @@ const {
   readSpectrumVariables,
   findDocumentLine,
   findStatementRange,
+  getStatementRanges,
+  findStatementIndexAtColumn,
   SinclairBasicDebugAdapterCore,
   decodeSpectrumString,
   mapSourceLineToBasic,
@@ -458,8 +460,94 @@ GO TO @loop
       const stmt2 = findStatementRange(line, 2);
       assert.strictEqual(line.slice(stmt2.startCol, stmt2.endCol), 'LET oldpy=0');
     });
+
+    it('getStatementRanges returns all statement boundaries with 1-based indexes', () => {
+      const line = '10 LET a=1: LET b=2: PRINT a+b';
+      const ranges = getStatementRanges(line);
+      assert.strictEqual(ranges.length, 3);
+      assert.strictEqual(ranges[0].stmtIndex, 1);
+      assert.strictEqual(line.slice(ranges[0].startCol, ranges[0].endCol), 'LET a=1');
+      assert.strictEqual(ranges[1].stmtIndex, 2);
+      assert.strictEqual(line.slice(ranges[1].startCol, ranges[1].endCol), 'LET b=2');
+      assert.strictEqual(ranges[2].stmtIndex, 3);
+      assert.strictEqual(line.slice(ranges[2].startCol, ranges[2].endCol), 'PRINT a+b');
+    });
+
+    it('findStatementIndexAtColumn returns statement index from column', () => {
+      const line = '10 LET a=1: LET b=2: PRINT a+b';
+      // Column at line start or inside stmt 1 -> 1
+      assert.strictEqual(findStatementIndexAtColumn(line, 1), 1);
+      assert.strictEqual(findStatementIndexAtColumn(line, 4), 1);
+      // Column inside stmt 2 (e.g. col 14) -> 2
+      assert.strictEqual(findStatementIndexAtColumn(line, 14), 2);
+      // Column inside stmt 3 (e.g. col 24) -> 3
+      assert.strictEqual(findStatementIndexAtColumn(line, 24), 3);
+    });
+  });
+
+  describe('Statement-level breakpoints in DAP', () => {
+    it('returns statement locations on breakpointLocations request', () => {
+      const responses = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: () => {},
+        sendResponse: (r) => responses.push(r)
+      });
+
+      const doc = '10 LET a=1: LET b=2: PRINT a+b\n20 STOP';
+      adapter.setDocument('test.bas', doc);
+
+      adapter.handleMessage({
+        seq: 1,
+        type: 'request',
+        command: 'breakpointLocations',
+        arguments: { line: 1 }
+      });
+
+      const resp = responses[0];
+      assert.strictEqual(resp.command, 'breakpointLocations');
+      const bkp = resp.body.breakpoints;
+      assert.strictEqual(bkp.length, 3);
+      assert.strictEqual(bkp[0].line, 1);
+      assert.strictEqual(bkp[0].column, 4);  // start of 'LET a=1'
+      assert.strictEqual(bkp[1].line, 1);
+      assert.strictEqual(bkp[1].column, 13); // start of 'LET b=2'
+      assert.strictEqual(bkp[2].line, 1);
+      assert.strictEqual(bkp[2].column, 22); // start of 'PRINT a+b'
+    });
+
+    it('sets statement-specific breakpoints when column is provided', () => {
+      const actions = [];
+      const responses = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: () => {},
+        sendResponse: (r) => responses.push(r),
+        onAction: (a, d) => actions.push({ action: a, data: d })
+      });
+
+      const doc = '10 LET a=1: LET b=2: PRINT a+b\n20 STOP';
+      adapter.setDocument('test.bas', doc);
+
+      // Set breakpoint specifically on statement 2 (column 13)
+      adapter.handleMessage({
+        seq: 1,
+        type: 'request',
+        command: 'setBreakpoints',
+        arguments: {
+          source: { path: 'test.bas' },
+          breakpoints: [
+            { line: 1, column: 13 }
+          ]
+        }
+      });
+
+      assert.strictEqual(actions[0].action, 'setBreakpoints');
+      assert.deepStrictEqual(actions[0].data.breakpoints, [
+        { line: 10, stmt: 2 }
+      ]);
+    });
   });
 
 });
+
 
 

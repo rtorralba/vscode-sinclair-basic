@@ -16,6 +16,8 @@ const { uploadTapToHost, buildTurbo80ShareUrl } = require('./core/share');
 const {
   findDocumentLine,
   findStatementRange,
+  getStatementRanges,
+  findStatementIndexAtColumn,
   SinclairBasicDebugAdapterCore,
   mapSourceLineToBasic,
   mapBasicToSourceLine
@@ -200,7 +202,7 @@ function activate(context) {
             if (currentTurbo80Panel) {
               currentTurbo80Panel.webview.postMessage({
                 command: 'setBreakpoints',
-                breakpoints: data.lines
+                breakpoints: data.breakpoints || data.lines
               });
             }
           }
@@ -256,27 +258,33 @@ function activate(context) {
       b.location.uri.toString() === uriStr &&
       b.enabled !== false
     );
-    const basicLines = [];
+    const targetBreakpoints = [];
     const isJBas = document.fileName.endsWith('.jbas') || document.languageId === 'jbas';
 
     for (const bp of bps) {
       const lineIndex = bp.location.range.start.line;
       if (lineIndex < document.lineCount) {
+        const lineText = document.lineAt(lineIndex).text;
+        const col1 = (bp.location.range.start.character || 0) + 1;
+        const stmtIndex = findStatementIndexAtColumn(lineText, col1);
+
+        let basicLine = null;
         if (isJBas && activeDebugSourceMap && activeDebugSourceMap.sourceToBasic) {
-          const mapped = mapSourceLineToBasic(lineIndex + 1, activeDebugSourceMap.sourceToBasic);
-          if (mapped !== null && mapped !== undefined) {
-            basicLines.push(mapped);
-          }
+          basicLine = mapSourceLineToBasic(lineIndex + 1, activeDebugSourceMap.sourceToBasic);
         } else {
-          const lineText = document.lineAt(lineIndex).text;
           const m = lineText.match(/^\s*(\d+)/);
           if (m) {
-            basicLines.push(parseInt(m[1], 10));
+            basicLine = parseInt(m[1], 10);
+          } else {
+            basicLine = lineIndex + 1;
           }
+        }
+        if (basicLine !== null && basicLine !== undefined) {
+          targetBreakpoints.push({ line: basicLine, stmt: stmtIndex });
         }
       }
     }
-    return basicLines;
+    return targetBreakpoints;
   }
 
   function clearDebugDecorations() {
@@ -538,18 +546,45 @@ function activate(context) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const uri = editor.document.uri;
-    const line = editor.selection.active.line;
-    const existing = vscode.debug.breakpoints.find(b =>
-      b instanceof vscode.SourceBreakpoint &&
-      b.location.uri.toString() === uri.toString() &&
-      b.location.range.start.line === line
-    );
-    if (existing) {
-      vscode.debug.removeBreakpoints([existing]);
+    const pos = editor.selection.active;
+    const line = pos.line;
+    const lineText = editor.document.lineAt(line).text;
+    const ranges = getStatementRanges(lineText);
+
+    if (ranges.length > 1) {
+      const curStmt = findStatementIndexAtColumn(lineText, pos.character + 1);
+      const targetRange = ranges[curStmt - 1];
+      const targetCol = targetRange ? targetRange.startCol : 0;
+
+      const existing = vscode.debug.breakpoints.find(b =>
+        b instanceof vscode.SourceBreakpoint &&
+        b.location.uri.toString() === uri.toString() &&
+        b.location.range.start.line === line &&
+        targetRange &&
+        b.location.range.start.character >= targetRange.startCol &&
+        b.location.range.start.character <= targetRange.endCol
+      );
+
+      if (existing) {
+        vscode.debug.removeBreakpoints([existing]);
+      } else {
+        vscode.debug.addBreakpoints([
+          new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, targetCol)))
+        ]);
+      }
     } else {
-      vscode.debug.addBreakpoints([
-        new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, 0)))
-      ]);
+      const existing = vscode.debug.breakpoints.find(b =>
+        b instanceof vscode.SourceBreakpoint &&
+        b.location.uri.toString() === uri.toString() &&
+        b.location.range.start.line === line
+      );
+      if (existing) {
+        vscode.debug.removeBreakpoints([existing]);
+      } else {
+        vscode.debug.addBreakpoints([
+          new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, 0)))
+        ]);
+      }
     }
   }
 

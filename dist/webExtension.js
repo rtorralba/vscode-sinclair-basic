@@ -2891,8 +2891,8 @@ var require_debugger = __commonJS({
       }
       return res !== void 0 ? res : basicLine;
     }
-    function findStatementRange2(lineText, stmtIndex) {
-      if (typeof lineText !== "string") return { startCol: 0, endCol: 0 };
+    function getStatementRanges2(lineText) {
+      if (typeof lineText !== "string") return [];
       const prefixMatch = lineText.match(/^(\s*@[a-zA-Z0-9_]+:\s*|\s*\d+\s*|\s*)/);
       const codeStart = prefixMatch ? prefixMatch[0].length : 0;
       let inString = false;
@@ -2907,18 +2907,38 @@ var require_debugger = __commonJS({
           if (lineText.slice(i, i + 3).toUpperCase() === "REM" && (i === codeStart || /\s|:/.test(lineText[i - 1]))) {
             inRem = true;
           } else if (ch === ":") {
-            segments.push({ startCol: segStart, endCol: i });
+            segments.push({ stmtIndex: segments.length + 1, startCol: segStart, endCol: i });
             segStart = i + 1;
             if (lineText[segStart] === " ") segStart++;
           }
         }
       }
-      segments.push({ startCol: segStart, endCol: lineText.length });
+      segments.push({ stmtIndex: segments.length + 1, startCol: segStart, endCol: lineText.length });
+      return segments;
+    }
+    function findStatementRange2(lineText, stmtIndex) {
+      const segments = getStatementRanges2(lineText);
       const idx = Math.max(1, stmtIndex) - 1;
       if (idx < segments.length) {
-        return segments[idx];
+        return { startCol: segments[idx].startCol, endCol: segments[idx].endCol };
       }
-      return { startCol: codeStart, endCol: lineText.length };
+      const prefixMatch = typeof lineText === "string" ? lineText.match(/^(\s*@[a-zA-Z0-9_]+:\s*|\s*\d+\s*|\s*)/) : null;
+      const codeStart = prefixMatch ? prefixMatch[0].length : 0;
+      return { startCol: codeStart, endCol: lineText ? lineText.length : 0 };
+    }
+    function findStatementIndexAtColumn2(lineText, column1) {
+      if (!column1 || column1 <= 1) return 1;
+      const col0 = column1 - 1;
+      const ranges = getStatementRanges2(lineText);
+      for (const r of ranges) {
+        if (col0 >= r.startCol && col0 <= r.endCol) {
+          return r.stmtIndex;
+        }
+      }
+      if (ranges.length > 0 && col0 > ranges[ranges.length - 1].endCol) {
+        return ranges[ranges.length - 1].stmtIndex;
+      }
+      return 1;
     }
     var SinclairBasicDebugAdapterCore2 = class {
       constructor(options = {}) {
@@ -2978,6 +2998,7 @@ var require_debugger = __commonJS({
               supportsConfigurationDoneRequest: true,
               supportsRestartRequest: true,
               supportsTerminateRequest: true,
+              supportsBreakpointLocationsRequest: true,
               supportsConditionalBreakpoints: false,
               supportsHitConditionalBreakpoints: false,
               supportsSetVariable: false,
@@ -2995,44 +3016,77 @@ var require_debugger = __commonJS({
             this._sendSuccess(request, {});
             break;
           }
+          case "breakpointLocations": {
+            const line = args.line;
+            const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+            const docLine0 = line - 1;
+            const locations = [];
+            if (docLine0 >= 0 && docLine0 < lines.length) {
+              const lineText = lines[docLine0];
+              const ranges = getStatementRanges2(lineText);
+              for (const r of ranges) {
+                locations.push({
+                  line,
+                  column: r.startCol + 1
+                });
+              }
+            }
+            this._sendSuccess(request, {
+              breakpoints: locations.length > 0 ? locations : [{ line, column: 1 }]
+            });
+            break;
+          }
           case "setBreakpoints": {
             const sourcePath = args.source && (args.source.path || args.source.name) || "";
             const clientBreakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
-            const basicLines = [];
-            if (this.sourceMap && this.sourceMap.sourceToBasic) {
-              for (const bp of clientBreakpoints) {
-                const mapped = mapSourceLineToBasic2(bp.line, this.sourceMap.sourceToBasic);
-                if (mapped !== null && mapped !== void 0) {
-                  basicLines.push(mapped);
-                }
-              }
-            } else {
-              const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
-              for (const bp of clientBreakpoints) {
-                const docLine0 = bp.line - 1;
+            const targetBreakpoints = [];
+            const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+            for (const bp of clientBreakpoints) {
+              const docLine0 = bp.line - 1;
+              const lineText = docLine0 >= 0 && docLine0 < lines.length ? lines[docLine0] : "";
+              const stmtIndex = findStatementIndexAtColumn2(lineText, bp.column);
+              let basicLine = null;
+              if (this.sourceMap && this.sourceMap.sourceToBasic) {
+                basicLine = mapSourceLineToBasic2(bp.line, this.sourceMap.sourceToBasic);
+              } else {
                 if (docLine0 >= 0 && docLine0 < lines.length) {
                   const m = lines[docLine0].match(/^\s*(\d+)/);
                   if (m) {
-                    basicLines.push(parseInt(m[1], 10));
+                    basicLine = parseInt(m[1], 10);
                   } else {
-                    basicLines.push(bp.line);
+                    basicLine = bp.line;
                   }
                 } else {
-                  basicLines.push(bp.line);
+                  basicLine = bp.line;
                 }
               }
+              if (basicLine !== null && basicLine !== void 0) {
+                targetBreakpoints.push({
+                  line: basicLine,
+                  stmt: stmtIndex
+                });
+              }
             }
-            this.breakpoints.set(sourcePath, new Set(basicLines));
+            this.breakpoints.set(sourcePath, targetBreakpoints);
             this.onAction("setBreakpoints", {
               sourcePath,
-              lines: basicLines,
+              breakpoints: targetBreakpoints,
+              lines: targetBreakpoints.map((b) => b.line),
               rawBreakpoints: clientBreakpoints
             });
             this._sendSuccess(request, {
-              breakpoints: clientBreakpoints.map((bp) => ({
-                verified: true,
-                line: bp.line
-              }))
+              breakpoints: clientBreakpoints.map((bp) => {
+                const docLine0 = bp.line - 1;
+                const lineText = docLine0 >= 0 && docLine0 < lines.length ? lines[docLine0] : "";
+                const stmtIndex = findStatementIndexAtColumn2(lineText, bp.column);
+                const ranges = getStatementRanges2(lineText);
+                const r = ranges[stmtIndex - 1];
+                return {
+                  verified: true,
+                  line: bp.line,
+                  column: r ? r.startCol + 1 : bp.column || 1
+                };
+              })
             });
             break;
           }
@@ -3226,6 +3280,8 @@ var require_debugger = __commonJS({
       readSpectrumVariables,
       findDocumentLine: findDocumentLine2,
       findStatementRange: findStatementRange2,
+      getStatementRanges: getStatementRanges2,
+      findStatementIndexAtColumn: findStatementIndexAtColumn2,
       SinclairBasicDebugAdapterCore: SinclairBasicDebugAdapterCore2,
       decodeSpectrumString,
       mapSourceLineToBasic: mapSourceLineToBasic2,
@@ -3665,7 +3721,7 @@ var require_turbo80Html = __commonJS({
     const basicDebugger = {
       enabled: false,
       attached: false,
-      breakpoints: new Set(),
+      breakpoints: new Map(),
       stepMode: null,
       pauseRequested: false,
       lastLine: null,
@@ -3673,6 +3729,28 @@ var require_turbo80Html = __commonJS({
       lastPausedLine: null,
       lastPausedStmt: null,
       vars: [],
+
+      setBreakpoints(bps) {
+        this.breakpoints = new Map();
+        if (Array.isArray(bps)) {
+          for (const bp of bps) {
+            let line, stmt;
+            if (typeof bp === 'number') {
+              line = bp;
+              stmt = 1;
+            } else if (bp && typeof bp === 'object') {
+              line = bp.line;
+              stmt = (typeof bp.stmt === 'number') ? bp.stmt : 1;
+            }
+            if (typeof line === 'number') {
+              if (!this.breakpoints.has(line)) {
+                this.breakpoints.set(line, new Set());
+              }
+              this.breakpoints.get(line).add(stmt);
+            }
+          }
+        }
+      },
 
       attach(sp) {
         if (!sp || this.attached) return;
@@ -3713,12 +3791,15 @@ var require_turbo80Html = __commonJS({
             return true;
           }
 
-          if (this.breakpoints.has(line)) {
-            if (line === this.lastPausedLine && stmt === this.lastPausedStmt) {
-              return false;
+          const stmtSet = this.breakpoints.get(line);
+          if (stmtSet) {
+            if (stmtSet.has(stmt) || stmtSet.has(0)) {
+              if (line === this.lastPausedLine && stmt === this.lastPausedStmt) {
+                return false;
+              }
+              this.onBreakHit(line, stmt, spectrum);
+              return true;
             }
-            this.onBreakHit(line, stmt, spectrum);
-            return true;
           }
 
           return false;
@@ -3840,9 +3921,7 @@ var require_turbo80Html = __commonJS({
         pendingData = msg;
         if (msg.debug) {
           basicDebugger.enabled = true;
-          if (Array.isArray(msg.breakpoints)) {
-            basicDebugger.breakpoints = new Set(msg.breakpoints);
-          }
+          basicDebugger.setBreakpoints(msg.breakpoints);
           if (msg.stopOnEntry || basicDebugger.breakpoints.size === 0) {
             basicDebugger.pauseRequested = true;
           }
@@ -3858,7 +3937,7 @@ var require_turbo80Html = __commonJS({
         }
       } else if (msg.command === 'setBreakpoints') {
         const bps = Array.isArray(msg.breakpoints) ? msg.breakpoints : (Array.isArray(msg.lines) ? msg.lines : []);
-        basicDebugger.breakpoints = new Set(bps);
+        basicDebugger.setBreakpoints(bps);
       } else if (msg.command === 'debugContinue') {
         doContinue();
       } else if (msg.command === 'debugPause') {
@@ -3921,6 +4000,8 @@ var { uploadTapToHost, buildTurbo80ShareUrl } = require_share();
 var {
   findDocumentLine,
   findStatementRange,
+  getStatementRanges,
+  findStatementIndexAtColumn,
   SinclairBasicDebugAdapterCore,
   mapSourceLineToBasic,
   mapBasicToSourceLine
@@ -4052,7 +4133,7 @@ function activate(context) {
             if (currentTurbo80Panel) {
               currentTurbo80Panel.webview.postMessage({
                 command: "setBreakpoints",
-                breakpoints: data.lines
+                breakpoints: data.breakpoints || data.lines
               });
             }
           }
@@ -4099,26 +4180,31 @@ function activate(context) {
     const bps = vscode.debug.breakpoints.filter(
       (b) => b instanceof vscode.SourceBreakpoint && b.location.uri.toString() === uriStr && b.enabled !== false
     );
-    const basicLines = [];
+    const targetBreakpoints = [];
     const isJBas = document.fileName.endsWith(".jbas") || document.languageId === "jbas";
     for (const bp of bps) {
       const lineIndex = bp.location.range.start.line;
       if (lineIndex < document.lineCount) {
+        const lineText = document.lineAt(lineIndex).text;
+        const col1 = (bp.location.range.start.character || 0) + 1;
+        const stmtIndex = findStatementIndexAtColumn(lineText, col1);
+        let basicLine = null;
         if (isJBas && activeDebugSourceMap && activeDebugSourceMap.sourceToBasic) {
-          const mapped = mapSourceLineToBasic(lineIndex + 1, activeDebugSourceMap.sourceToBasic);
-          if (mapped !== null && mapped !== void 0) {
-            basicLines.push(mapped);
-          }
+          basicLine = mapSourceLineToBasic(lineIndex + 1, activeDebugSourceMap.sourceToBasic);
         } else {
-          const lineText = document.lineAt(lineIndex).text;
           const m = lineText.match(/^\s*(\d+)/);
           if (m) {
-            basicLines.push(parseInt(m[1], 10));
+            basicLine = parseInt(m[1], 10);
+          } else {
+            basicLine = lineIndex + 1;
           }
+        }
+        if (basicLine !== null && basicLine !== void 0) {
+          targetBreakpoints.push({ line: basicLine, stmt: stmtIndex });
         }
       }
     }
-    return basicLines;
+    return targetBreakpoints;
   }
   function clearDebugDecorations() {
     vscode.window.visibleTextEditors.forEach((editor) => {
@@ -4350,16 +4436,35 @@ Haz clic para inspeccionar variables en RAM.`;
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const uri = editor.document.uri;
-    const line = editor.selection.active.line;
-    const existing = vscode.debug.breakpoints.find(
-      (b) => b instanceof vscode.SourceBreakpoint && b.location.uri.toString() === uri.toString() && b.location.range.start.line === line
-    );
-    if (existing) {
-      vscode.debug.removeBreakpoints([existing]);
+    const pos = editor.selection.active;
+    const line = pos.line;
+    const lineText = editor.document.lineAt(line).text;
+    const ranges = getStatementRanges(lineText);
+    if (ranges.length > 1) {
+      const curStmt = findStatementIndexAtColumn(lineText, pos.character + 1);
+      const targetRange = ranges[curStmt - 1];
+      const targetCol = targetRange ? targetRange.startCol : 0;
+      const existing = vscode.debug.breakpoints.find(
+        (b) => b instanceof vscode.SourceBreakpoint && b.location.uri.toString() === uri.toString() && b.location.range.start.line === line && targetRange && b.location.range.start.character >= targetRange.startCol && b.location.range.start.character <= targetRange.endCol
+      );
+      if (existing) {
+        vscode.debug.removeBreakpoints([existing]);
+      } else {
+        vscode.debug.addBreakpoints([
+          new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, targetCol)))
+        ]);
+      }
     } else {
-      vscode.debug.addBreakpoints([
-        new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, 0)))
-      ]);
+      const existing = vscode.debug.breakpoints.find(
+        (b) => b instanceof vscode.SourceBreakpoint && b.location.uri.toString() === uri.toString() && b.location.range.start.line === line
+      );
+      if (existing) {
+        vscode.debug.removeBreakpoints([existing]);
+      } else {
+        vscode.debug.addBreakpoints([
+          new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, 0)))
+        ]);
+      }
     }
   }
   async function handleShowDebugVariables() {
