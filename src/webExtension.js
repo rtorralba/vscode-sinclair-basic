@@ -13,6 +13,11 @@ const { translateWildcardsToChr } = require('./core/wildcards');
 const { getBasFoldingRanges } = require('./core/folding');
 const { findBasJumpTargetAtPosition, findBasLineIndex } = require('./core/definitions');
 const { uploadTapToHost, buildTurbo80ShareUrl } = require('./core/share');
+const {
+  findDocumentLine,
+  findStatementRange
+} = require('./core/debugger');
+const { getTurbo80Html } = require('./core/turbo80Html');
 
 /**
  * Returns the basename of a Uri, optionally stripping an extension.
@@ -141,354 +146,165 @@ async function buildTapFromDocument(doc) {
 }
 
 /**
- * HTML content for Turbo80 Webview
- */
-function getTurbo80Html(webview, extensionUri) {
-  const turbo80CoreUri = (webview && extensionUri)
-    ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'turbo80', 'turbo80-core.js'))
-    : '';
-  const turbo80Uri = (webview && extensionUri)
-    ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'turbo80', 'turbo80.js'))
-    : '';
-  const cspSource = (webview && webview.cspSource) ? webview.cspSource : '';
-
-  return `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'none';
-    script-src 'unsafe-inline' 'unsafe-eval' ${cspSource} https://turbo80.com;
-    frame-src https://turbo80.com;
-    style-src 'unsafe-inline' ${cspSource};
-    img-src https: data: ${cspSource};
-    font-src ${cspSource} data:;
-    connect-src https://turbo80.com ${cspSource} data: blob:;
-  ">
-  <title>Turbo80 - ZX Spectrum</title>
-  <style>
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #0c0c11;
-      color: #e9e9f2;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    #emulator-wrap {
-      flex: 1;
-      width: 100%;
-      height: calc(100% - 34px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      overflow-y: auto;
-      overflow-x: hidden;
-    }
-    #spectrum {
-      width: 100% !important;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-    #spectrum iframe {
-      border: 0;
-      width: 100% !important;
-      height: auto !important;
-      aspect-ratio: 4 / 3 !important;
-      max-width: 100vw;
-    }
-    #footer {
-      height: 34px;
-      background: #14141e;
-      border-top: 1px solid #28283a;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 1.2rem;
-      font-size: 12px;
-      color: #9b9bb0;
-      user-select: none;
-      flex-shrink: 0;
-    }
-    #footer a {
-      color: #37d0ff;
-      text-decoration: none;
-      font-weight: 500;
-      transition: color 0.15s ease;
-    }
-    #footer a:hover {
-      color: #57ef9e;
-      text-decoration: underline;
-    }
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-      font-size: 12px;
-    }
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #57ef9e;
-      box-shadow: 0 0 8px rgba(87, 239, 158, 0.7);
-    }
-    .attribution {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11.5px;
-    }
-  </style>
-</head>
-<body>
-  <div id="emulator-wrap">
-    <div id="spectrum" style="width: 100%;"></div>
-  </div>
-  <footer id="footer">
-    <div class="status-badge">
-      <span class="status-dot"></span>
-      <span id="game-title">Iniciando ZX Spectrum...</span>
-    </div>
-    <div class="attribution">
-      Emulado con <a href="https://turbo80.com" target="_blank" rel="noopener">Turbo80</a> &bull; Emulador de ZX Spectrum por Jos&eacute; Enrique Garc&iacute;a (Incinerator)
-    </div>
-  </footer>
-
-  <script src="${turbo80CoreUri}"></script>
-  <script src="${turbo80Uri}"></script>
-  <script>
-    if (typeof Turbo80 === 'undefined') {
-      const s = document.createElement('script');
-      s.src = 'https://turbo80.com/turbo80.js';
-      document.head.appendChild(s);
-    }
-  </script>
-  <script>
-    const vscode = acquireVsCodeApi();
-    let emulator = null;
-    let pendingData = null;
-
-    function adjustEmulatorSizing() {
-      const spectrum = document.getElementById('spectrum');
-      if (!spectrum) return;
-      const shadow = spectrum.shadowRoot;
-      if (shadow && !shadow.getElementById('t80-responsive-size')) {
-        const style = document.createElement('style');
-        style.id = 't80-responsive-size';
-        style.textContent = [
-          ':host { width: 100% !important; max-width: 100% !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; }',
-          '.t80-body { width: 100% !important; max-width: 100% !important; min-height: 0 !important; height: auto !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; background: transparent !important; }',
-          'main { width: 100% !important; max-width: 100% !important; min-height: 0 !important; height: auto !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; margin: 0 !important; padding: 0 !important; }',
-          '.screen-zone { width: 100% !important; max-width: 100% !important; height: auto !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; gap: 0 !important; }',
-          '.bezel { width: 100% !important; max-width: 100% !important; height: auto !important; margin: 0 !important; padding: 0 !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; }',
-          '.screen-wrap { width: 100% !important; max-width: 100% !important; height: auto !important; aspect-ratio: 4 / 3 !important; margin: 0 auto !important; }',
-          '#screen { width: 100% !important; max-width: 100% !important; height: auto !important; aspect-ratio: 4 / 3 !important; display: block !important; }',
-          '#crt-gl { width: 100% !important; height: 100% !important; }'
-        ].join('\\n');
-        shadow.appendChild(style);
-      }
-    }
-
-    function focusEmulator() {
-      try {
-        if (emulator && typeof emulator.focus === 'function') {
-          emulator.focus();
-        }
-      } catch (e) {}
-      try {
-        const shadow = (document.querySelector('#spectrum') && document.querySelector('#spectrum').shadowRoot) || (emulator && emulator.shadow);
-        const screen = shadow ? (shadow.getElementById('screen') || shadow.querySelector('canvas')) : document.querySelector('#spectrum canvas');
-        if (screen) {
-          if (!screen.hasAttribute('tabindex')) {
-            screen.setAttribute('tabindex', '0');
-          }
-          screen.focus();
-        }
-      } catch (e) {}
-      try {
-        const iframe = document.querySelector('#spectrum iframe') || (emulator && emulator.iframe);
-        if (iframe) {
-          if (!iframe.hasAttribute('tabindex')) {
-            iframe.setAttribute('tabindex', '0');
-          }
-          iframe.focus();
-          if (iframe.contentWindow) {
-            iframe.contentWindow.focus();
-          }
-          if (typeof iframe.click === 'function') {
-            iframe.click();
-          }
-        }
-      } catch (e) {}
-    }
-
-    function attachIframeListeners() {
-      try {
-        const iframe = document.querySelector('#spectrum iframe') || (emulator && emulator.iframe);
-        if (iframe && !iframe._hasLoadedListener) {
-          iframe._hasLoadedListener = true;
-          iframe.addEventListener('load', () => {
-            scheduleFocus();
-          });
-        }
-      } catch (e) {}
-    }
-
-    function scheduleFocus() {
-      adjustEmulatorSizing();
-      focusEmulator();
-      attachIframeListeners();
-      [50, 150, 300, 500, 800, 1200, 1800].forEach(delay => {
-        setTimeout(() => {
-          adjustEmulatorSizing();
-          focusEmulator();
-        }, delay);
-      });
-    }
-
-    function applyTap(data) {
-      try {
-        const binaryString = atob(data.base64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const currentModel = data.model || '48k';
-        document.getElementById('game-title').textContent = (data.filename || 'game.tap') + ' (' + currentModel.toUpperCase() + ')';
-
-        if (typeof Turbo80 === 'undefined') {
-          document.getElementById('game-title').textContent = 'Error cargando Turbo80 (comprueba tu conexi\u00f3n a internet)';
-          return;
-        }
-
-        if (!emulator) {
-          emulator = Turbo80(document.getElementById('spectrum'), {
-            load: bytes,
-            name: data.filename || 'game.tap',
-            model: currentModel,
-            crt: data.crt ? 'on' : 'off',
-            width: '100%'
-          });
-          if (emulator && typeof emulator.on === 'function') {
-            emulator.on('ready', () => {
-              adjustEmulatorSizing();
-              scheduleFocus();
-            });
-            emulator.on('loaded', () => {
-              adjustEmulatorSizing();
-              scheduleFocus();
-            });
-          }
-          attachIframeListeners();
-        } else {
-          const doLoad = () => emulator.load(bytes, data.filename || 'game.tap');
-          if (emulator.setModel) {
-            Promise.resolve(emulator.setModel(currentModel))
-              .then(() => {
-                if (emulator.reset) emulator.reset();
-                return doLoad();
-              })
-              .then(() => {
-                adjustEmulatorSizing();
-                scheduleFocus();
-              })
-              .catch(() => {
-                doLoad();
-                adjustEmulatorSizing();
-                scheduleFocus();
-              });
-          } else {
-            doLoad();
-            adjustEmulatorSizing();
-            scheduleFocus();
-          }
-        }
-        adjustEmulatorSizing();
-        scheduleFocus();
-      } catch (err) {
-        console.error('Error loading TAP into Turbo80:', err);
-        document.getElementById('game-title').textContent = 'Error al cargar TAP: ' + err.message;
-      }
-    }
-
-    window.addEventListener('message', event => {
-      const msg = event.data;
-      if (msg.command === 'loadTap') {
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-          applyTap(msg);
-        } else {
-          pendingData = msg;
-        }
-      }
-    });
-
-    window.addEventListener('DOMContentLoaded', () => {
-      adjustEmulatorSizing();
-      if (pendingData) {
-        applyTap(pendingData);
-        pendingData = null;
-      }
-      vscode.postMessage({ command: 'ready' });
-    });
-
-    window.addEventListener('resize', adjustEmulatorSizing);
-    setInterval(adjustEmulatorSizing, 250);
-
-    window.addEventListener('focus', focusEmulator);
-    window.addEventListener('pointerdown', focusEmulator);
-    window.addEventListener('click', focusEmulator);
-    window.addEventListener('keydown', focusEmulator);
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
-        scheduleFocus();
-      }
-    });
-  </script>
-</body>
-</html>`;
-}
-
-/**
  * Activates the Web Extension.
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
   let currentTurbo80Panel = null;
 
-  function runTurbo80Webview(tapBytes, filename) {
+  let activeDebugDoc = null;
+  let activeDebugLine = null;
+  let activeDebugStmt = null;
+  let activeDebugVars = [];
+  let isDebuggingActive = false;
+
+  const debugLineDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    backgroundColor: 'rgba(255, 215, 0, 0.22)',
+    overviewRulerColor: 'rgba(255, 215, 0, 0.85)',
+    overviewRulerLane: vscode.OverviewRulerLane.Full
+  });
+
+  const debugStmtDecoration = vscode.window.createTextEditorDecorationType({
+    backgroundColor: 'rgba(255, 204, 0, 0.45)',
+    borderRadius: '3px',
+    border: '1px solid rgba(255, 204, 0, 0.9)'
+  });
+
+  const debugStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+
+  function getBreakpointsForDocument(document) {
+    if (!document) return [];
+    const uriStr = document.uri.toString();
+    const bps = vscode.debug.breakpoints.filter(b =>
+      b instanceof vscode.SourceBreakpoint &&
+      b.location.uri.toString() === uriStr &&
+      b.enabled !== false
+    );
+    const basicLines = [];
+    for (const bp of bps) {
+      const lineIndex = bp.location.range.start.line;
+      if (lineIndex < document.lineCount) {
+        const lineText = document.lineAt(lineIndex).text;
+        const m = lineText.match(/^\s*(\d+)/);
+        if (m) {
+          basicLines.push(parseInt(m[1], 10));
+        }
+      }
+    }
+    return basicLines;
+  }
+
+  function clearDebugDecorations() {
+    vscode.window.visibleTextEditors.forEach(editor => {
+      editor.setDecorations(debugLineDecoration, []);
+      editor.setDecorations(debugStmtDecoration, []);
+    });
+  }
+
+  function highlightDebugPosition(doc, basicLine, stmt) {
+    clearDebugDecorations();
+    if (!doc) return;
+    const docLine = findDocumentLine(doc.getText(), basicLine);
+    if (docLine < 0 || docLine >= doc.lineCount) return;
+
+    const lineText = doc.lineAt(docLine).text;
+    const lineRange = new vscode.Range(docLine, 0, docLine, lineText.length);
+    const stmtRangeObj = findStatementRange(lineText, stmt);
+    const stmtRange = new vscode.Range(docLine, stmtRangeObj.startCol, docLine, stmtRangeObj.endCol);
+
+    const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === doc.uri.toString());
+    if (editor) {
+      editor.setDecorations(debugLineDecoration, [lineRange]);
+      editor.setDecorations(debugStmtDecoration, [stmtRange]);
+      editor.revealRange(lineRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    } else {
+      vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preserveFocus: true })
+        .then(ed => {
+          ed.setDecorations(debugLineDecoration, [lineRange]);
+          ed.setDecorations(debugStmtDecoration, [stmtRange]);
+          ed.revealRange(lineRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+        }, () => {});
+    }
+  }
+
+  function handleBasicPaused(line, stmt, vars) {
+    activeDebugLine = line;
+    activeDebugStmt = stmt;
+    activeDebugVars = Array.isArray(vars) ? vars : [];
+
+    vscode.commands.executeCommand('setContext', 'sinclairBasic.isDebugging', true);
+    vscode.commands.executeCommand('setContext', 'sinclairBasic.isPaused', true);
+
+    debugStatusBarItem.text = `$(debug-pause) BASIC: Línea ${line} (Sent. ${stmt})`;
+    debugStatusBarItem.tooltip = `Sinclair BASIC pausado en línea ${line}, sentencia ${stmt}.\nHaz clic para inspeccionar variables en RAM.`;
+    debugStatusBarItem.command = 'sinclairBasic.showDebugVariables';
+    debugStatusBarItem.show();
+
+    if (activeDebugDoc) {
+      highlightDebugPosition(activeDebugDoc, line, stmt);
+    }
+  }
+
+  function handleBasicResumed() {
+    clearDebugDecorations();
+    vscode.commands.executeCommand('setContext', 'sinclairBasic.isPaused', false);
+    if (isDebuggingActive) {
+      debugStatusBarItem.text = '$(play) BASIC: Ejecutando...';
+      debugStatusBarItem.tooltip = 'Sinclair BASIC en ejecución en Turbo80';
+      debugStatusBarItem.show();
+    }
+  }
+
+  function handleDebugStopped() {
+    isDebuggingActive = false;
+    activeDebugDoc = null;
+    activeDebugLine = null;
+    activeDebugStmt = null;
+    activeDebugVars = [];
+    clearDebugDecorations();
+    debugStatusBarItem.hide();
+    vscode.commands.executeCommand('setContext', 'sinclairBasic.isDebugging', false);
+    vscode.commands.executeCommand('setContext', 'sinclairBasic.isPaused', false);
+  }
+
+  function runTurbo80Webview(tapBytes, filename, options = {}) {
     const config = vscode.workspace.getConfiguration('sinclairBasic');
     const model = config.get('turbo80Model', '48k') || '48k';
     const crt = config.get('turbo80Crt', true);
     const base64 = uint8ArrayToBase64(tapBytes);
+
+    const isDebug = !!options.debug;
+    const breakpoints = Array.isArray(options.breakpoints) ? options.breakpoints : [];
+    const stopOnEntry = options.stopOnEntry !== undefined ? options.stopOnEntry : (breakpoints.length === 0);
+
+    if (isDebug) {
+      isDebuggingActive = true;
+      activeDebugDoc = options.doc || null;
+      vscode.commands.executeCommand('setContext', 'sinclairBasic.isDebugging', true);
+      debugStatusBarItem.text = '$(play) BASIC: Iniciando depurador...';
+      debugStatusBarItem.show();
+    }
 
     const payload = {
       command: 'loadTap',
       base64,
       filename,
       model,
-      crt
+      crt,
+      debug: isDebug,
+      breakpoints,
+      stopOnEntry
     };
 
     if (currentTurbo80Panel) {
       currentTurbo80Panel.reveal(vscode.ViewColumn.Beside, false);
-      currentTurbo80Panel.title = `ZX: ${filename}`;
+      currentTurbo80Panel.title = `ZX: ${filename}${isDebug ? ' (Debug)' : ''}`;
       currentTurbo80Panel.webview.postMessage(payload);
     } else {
       currentTurbo80Panel = vscode.window.createWebviewPanel(
         'sinclairBasicTurbo80',
-        `ZX: ${filename}`,
+        `ZX: ${filename}${isDebug ? ' (Debug)' : ''}`,
         {
           viewColumn: vscode.ViewColumn.Beside,
           preserveFocus: false
@@ -502,18 +318,122 @@ function activate(context) {
         }
       );
 
-      currentTurbo80Panel.webview.html = getTurbo80Html(currentTurbo80Panel.webview, context.extensionUri);
+      currentTurbo80Panel.webview.html = getTurbo80Html(currentTurbo80Panel.webview, context.extensionUri, vscode);
 
       currentTurbo80Panel.webview.onDidReceiveMessage(message => {
         if (message.command === 'ready') {
           currentTurbo80Panel.webview.postMessage(payload);
+        } else if (message.command === 'basicPaused') {
+          handleBasicPaused(message.line, message.stmt, message.vars);
+        } else if (message.command === 'basicResumed') {
+          handleBasicResumed();
+        } else if (message.command === 'debugStopped') {
+          handleDebugStopped();
         }
       });
 
       currentTurbo80Panel.onDidDispose(() => {
         currentTurbo80Panel = null;
+        handleDebugStopped();
       });
     }
+  }
+
+  async function handleDebugTurbo80(uri) {
+    const doc = await getTargetDocument(uri);
+    if (!doc) {
+      vscode.window.showInformationMessage('No active editor or Sinclair BASIC file selected.');
+      return;
+    }
+    let res = null;
+    if (doc.fileName.endsWith('.jbas')) {
+      res = await handleCompileJBas(uri);
+    } else if (doc.fileName.endsWith('.bas')) {
+      res = await handleCompileBas(uri);
+    } else {
+      vscode.window.showWarningMessage('Please select a .bas or .jbas file to debug.');
+      return;
+    }
+    if (!res) return;
+
+    const breakpoints = getBreakpointsForDocument(doc);
+    runTurbo80Webview(res.tapBytes, res.filename, {
+      debug: true,
+      breakpoints,
+      doc
+    });
+  }
+
+  function handleDebugContinue() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: 'debugContinue' });
+    }
+  }
+
+  function handleDebugPause() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: 'debugPause' });
+    }
+  }
+
+  function handleDebugStepLine() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: 'debugStepLine' });
+    }
+  }
+
+  function handleDebugStepStmt() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: 'debugStepStmt' });
+    }
+  }
+
+  function handleDebugRestart() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: 'debugRestart' });
+    }
+  }
+
+  function handleDebugStop() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: 'debugStop' });
+    }
+    handleDebugStopped();
+  }
+
+  function handleToggleBreakpoint() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const uri = editor.document.uri;
+    const line = editor.selection.active.line;
+    const existing = vscode.debug.breakpoints.find(b =>
+      b instanceof vscode.SourceBreakpoint &&
+      b.location.uri.toString() === uri.toString() &&
+      b.location.range.start.line === line
+    );
+    if (existing) {
+      vscode.debug.removeBreakpoints([existing]);
+    } else {
+      vscode.debug.addBreakpoints([
+        new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, 0)))
+      ]);
+    }
+  }
+
+  async function handleShowDebugVariables() {
+    if (!isDebuggingActive || activeDebugVars.length === 0) {
+      vscode.window.showInformationMessage('Sin variables activas en RAM del ZX Spectrum en este momento.');
+      return;
+    }
+    const items = activeDebugVars.map(v => ({
+      label: `${v.name} = ${v.type === 'string' ? '"' + v.value + '"' : v.value}`,
+      description: `Tipo: ${v.type}${v.length !== undefined ? ` (longitud: ${v.length})` : ''}`,
+      detail: `Línea actual: ${activeDebugLine}, Sentencia: ${activeDebugStmt}`
+    }));
+    await vscode.window.showQuickPick(items, {
+      title: `Variables ZX Spectrum (Línea ${activeDebugLine}, Sentencia ${activeDebugStmt})`,
+      placeHolder: 'Inspección de variables en memoria RAM'
+    });
   }
 
   // Command: Renumber Lines
@@ -1066,6 +986,51 @@ function activate(context) {
     vscode.commands.registerCommand('sinclairBasic.runTurbo80', handleRunTurbo80),
     vscode.commands.registerCommand('sinclairBasic.runExternalEmulator', handleRunExternalEmulator),
     vscode.commands.registerCommand('sinclairBasic.shareTurbo80', handleShareTurbo80),
+
+    // Debugger commands for Sinclair BASIC (48K step-by-step & variables)
+    vscode.commands.registerCommand('sinclairBasic.debugTurbo80', handleDebugTurbo80),
+    vscode.commands.registerCommand('sinclairBasic.debugContinue', handleDebugContinue),
+    vscode.commands.registerCommand('sinclairBasic.debugPause', handleDebugPause),
+    vscode.commands.registerCommand('sinclairBasic.debugStepLine', handleDebugStepLine),
+    vscode.commands.registerCommand('sinclairBasic.debugStepStmt', handleDebugStepStmt),
+    vscode.commands.registerCommand('sinclairBasic.debugRestart', handleDebugRestart),
+    vscode.commands.registerCommand('sinclairBasic.debugStop', handleDebugStop),
+    vscode.commands.registerCommand('sinclairBasic.toggleBreakpoint', handleToggleBreakpoint),
+    vscode.commands.registerCommand('sinclairBasic.showDebugVariables', handleShowDebugVariables),
+    vscode.debug.registerDebugConfigurationProvider('sinclair-basic', {
+      provideDebugConfigurations() {
+        return [
+          {
+            type: 'sinclair-basic',
+            request: 'launch',
+            name: 'Debug Sinclair BASIC (Turbo80)'
+          }
+        ];
+      },
+      resolveDebugConfiguration(folder, config) {
+        handleDebugTurbo80();
+        return undefined;
+      }
+    }),
+    debugStatusBarItem,
+    debugLineDecoration,
+    debugStmtDecoration,
+    vscode.debug.onDidChangeBreakpoints(() => {
+      if (isDebuggingActive && activeDebugDoc && currentTurbo80Panel) {
+        const bps = getBreakpointsForDocument(activeDebugDoc);
+        currentTurbo80Panel.webview.postMessage({
+          command: 'setBreakpoints',
+          breakpoints: bps
+        });
+      }
+    }),
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+      if (isDebuggingActive && activeDebugDoc && editor && editor.document.uri.toString() === activeDebugDoc.uri.toString()) {
+        if (activeDebugLine !== null && activeDebugStmt !== null) {
+          highlightDebugPosition(activeDebugDoc, activeDebugLine, activeDebugStmt);
+        }
+      }
+    }),
     vscode.commands.registerCommand('sinclairBasic.selectBas2tap', () => vscode.window.showInformationMessage('Executable path selection is only available on desktop.')),
     vscode.commands.registerCommand('sinclairBasic.selectEmulator', () => vscode.window.showInformationMessage('Executable path selection is only available on desktop.')),
     jbasLanguageConfig,

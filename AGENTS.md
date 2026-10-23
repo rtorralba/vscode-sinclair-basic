@@ -63,7 +63,9 @@ vscode-sinclair-basic/
 |       |-- share.js                     # Core engine: TAP upload & Turbo80.com shareable web link generator
 |       |-- keywords.js                  # Core metadata: Sinclair BASIC keyword definitions, docs & snippets
 |       |-- formatter.js                 # Core engine: Uppercase keyword formatter with string & comment protection
-|       +-- completions.js               # Autocompletion provider logic for Sinclair BASIC & JBAS
+|       |-- completions.js               # Autocompletion provider logic for Sinclair BASIC & JBAS
+|       |-- debugger.js                  # Core engine: ZX Spectrum 48K statement dispatcher (0x1B3D) & RAM variable decoder
+|       +-- turbo80Html.js               # Shared Webview HTML template with integrated Turbo80 runtime & debug UI
 |-- dist/
 |   +-- webExtension.js                  # Bundled single-file web extension (built via esbuild)
 |-- test/
@@ -77,7 +79,8 @@ vscode-sinclair-basic/
 |   |-- definitions.test.js              # Unit tests for .bas jump target Go to Definition provider
 |   |-- share.test.js                    # Unit tests for Turbo80 share engine
 |   |-- formatter.test.js                # Unit tests for uppercase keyword formatter
-|   +-- completions.test.js              # Unit tests for autocompletion provider
+|   |-- completions.test.js              # Unit tests for autocompletion provider
+|   +-- debugger.test.js                 # Unit tests for Sinclair BASIC debugger engine
 |-- AGENTS.md                            # Complete AI instructions (this file)
 |-- README.md                            # User-facing documentation & quickstart
 |-- LICENSE                              # GNU AGPL v3 License (Copyright Raül Torralba & Turbo80 attribution)
@@ -136,10 +139,11 @@ vscode-sinclair-basic/
    - `sinclairBasic.shareTurbo80`: Compila `.bas` o `.jbas` a `.tap` (o usa cualquier `.tap` existente), lo aloja automáticamente en Catbox y genera un enlace listo para jugar en `https://turbo80.com/?load=...` copiado al portapapeles.
    - `basFoldingProvider`: Provider semántico de plegado (`FoldingRangeProvider`) exclusivo para Sinclair BASIC estándar (`.bas`). Detecta llamadas `GO SUB <line>` / `GOSUB <line>` (incluyendo dianas múltiples como `ON x GOSUB 100, 200`) y pliega el cuerpo de la subrutina desde la línea de definición hasta su sentencia `RETURN`, protegiendo cadenas y comentarios `REM`. No interfiere en absoluto con `.jbas`.
    - `basDefinitionProvider`: Provider de navegación Go to Definition (`DefinitionProvider`) exclusivo para Sinclair BASIC estándar (`.bas`). Permite hacer `Ctrl+Click` (o pulsar `F12`) en el número de línea tras un salto (`GO SUB`, `GOSUB`, `GO TO`, `GOTO`, `RUN`, `RESTORE`, o saltos múltiples `ON x GO SUB 100, 200`) para saltar de inmediato a la definición de esa línea en el código.
+   - `sinclairBasic.debugTurbo80`: Depurador interactivo paso a paso de Sinclair BASIC para ZX Spectrum 48K. Intercepta el despachador de sentencias de la ROM del 48K (`0x1B3D`) mediante condiciones de punto de interrupción nativas en Turbo80 (`spectrum.bpConds`), permitiendo ejecución a 50 FPS sin sobrecarga hasta alcanzar un breakpoint o paso (`F5` Iniciar/Continuar, `F6` Pausar, `F10` Paso de línea, `F11` Paso de sentencia, `Shift+F5` Detener, `F9` Conmutar breakpoint). Resalta en amarillo brillante la línea y sentencia activa en el editor de VS Code, decodifica y muestra en tiempo real las variables en memoria RAM del ZX Spectrum (`VARS 0x5C4B`, floats de 5 bytes y cadenas) tanto en un cajón plegable del emulador como en el QuickPick de VS Code (`sinclairBasic.showDebugVariables`).
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 71 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 80 passing tests.
 
 ---
 

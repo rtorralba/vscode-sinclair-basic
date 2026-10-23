@@ -2665,103 +2665,174 @@ var require_share = __commonJS({
   }
 });
 
-// src/webExtension.js
-var vscode = require("vscode");
-var { renumberProgram } = require_renumber();
-var { compileJBas, transpileJBasAllVersions } = require_jbas2bas();
-var { bas2tap, tap2buffer } = require_tapGenerator();
-var { formatKeywordsToUpper } = require_formatter();
-var { createSinclairCompletionProvider } = require_completions();
-var { translateWildcardsToChr } = require_wildcards();
-var { getBasFoldingRanges } = require_folding();
-var { findBasJumpTargetAtPosition, findBasLineIndex } = require_definitions();
-var { uploadTapToHost, buildTurbo80ShareUrl } = require_share();
-function getBaseName(uri, extToRemove = "") {
-  const segments = uri.path.split("/");
-  const last = segments[segments.length - 1] || "program";
-  if (extToRemove && last.endsWith(extToRemove)) {
-    return last.slice(0, -extToRemove.length);
-  }
-  return last;
-}
-function getDistUri(docUri, outDirName = "dist") {
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(docUri);
-  const rootUri = workspaceFolder ? workspaceFolder.uri : vscode.Uri.joinPath(docUri, "..");
-  return vscode.Uri.joinPath(rootUri, outDirName);
-}
-function uint8ArrayToBase64(bytes) {
-  let binary = "";
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return typeof btoa !== "undefined" ? btoa(binary) : Buffer.from(bytes).toString("base64");
-}
-async function getTargetDocument(uri) {
-  if (uri) {
-    try {
-      return await vscode.workspace.openTextDocument(uri);
-    } catch {
+// src/core/debugger.js
+var require_debugger = __commonJS({
+  "src/core/debugger.js"(exports2, module2) {
+    var ROM48_STMT_ADDR = 6973;
+    var ROM48_LOOP_ADDR = 6953;
+    function decodeSinclairFloat(b0, b1, b2, b3, b4) {
+      if (b0 === 0) {
+        const sign = b1 === 255 ? -1 : 1;
+        const val2 = b2 & 255 | (b3 & 255) << 8;
+        return sign * val2;
+      }
+      const exp = b0 - 128;
+      const mant = (b1 & 127 | 128) * 16777216 + (b2 & 255) * 65536 + (b3 & 255) * 256 + (b4 & 255);
+      let val = mant * Math.pow(2, exp - 31);
+      if (b1 & 128) val = -val;
+      return Math.round(val * 1e6) / 1e6;
     }
-  }
-  if (vscode.window.activeTextEditor) {
-    return vscode.window.activeTextEditor.document;
-  }
-  return null;
-}
-async function buildTapFromDocument(doc) {
-  const config = vscode.workspace.getConfiguration("sinclairBasic");
-  const configuredAutoStart = config.get("autoStartLine", 0);
-  const outDirName = config.get("outputDirectory", "dist");
-  const distUri = getDistUri(doc.uri, outDirName);
-  await vscode.workspace.fs.createDirectory(distUri);
-  let basicCode = doc.getText();
-  let baseName = "";
-  if (doc.fileName.endsWith(".jbas")) {
-    baseName = getBaseName(doc.uri, ".jbas");
-    const all = transpileJBasAllVersions(basicCode);
-    if (!all.success) {
-      throw new Error("Compilation failed:\n" + all.errors.join("\n"));
+    function readSpectrumVariables(readByte) {
+      const varsStart = readByte(23627) & 255 | (readByte(23628) & 255) << 8;
+      const vars = [];
+      let p = varsStart;
+      const maxAddr = 65280;
+      while (p < maxAddr) {
+        const b = readByte(p);
+        if (b === 128 || b === 255 || b === 0) break;
+        const type = b >> 5 & 7;
+        const letterCode = b & 31;
+        if (type === 3) {
+          const name = String.fromCharCode(96 + letterCode);
+          const val = decodeSinclairFloat(
+            readByte(p + 1),
+            readByte(p + 2),
+            readByte(p + 3),
+            readByte(p + 4),
+            readByte(p + 5)
+          );
+          vars.push({ name, type: "number", value: val });
+          p += 6;
+        } else if (type === 5) {
+          let name = String.fromCharCode(96 + letterCode);
+          p++;
+          while (p < maxAddr) {
+            const c = readByte(p);
+            name += String.fromCharCode(c & 127);
+            p++;
+            if (c & 128) break;
+          }
+          const val = decodeSinclairFloat(
+            readByte(p),
+            readByte(p + 1),
+            readByte(p + 2),
+            readByte(p + 3),
+            readByte(p + 4)
+          );
+          vars.push({ name, type: "number", value: val });
+          p += 5;
+        } else if (type === 2) {
+          const name = String.fromCharCode(96 + letterCode) + "$";
+          const len = readByte(p + 1) & 255 | (readByte(p + 2) & 255) << 8;
+          let str = "";
+          for (let i = 0; i < len; i++) {
+            const ch = readByte(p + 3 + i);
+            if (ch >= 32 && ch <= 126) {
+              str += String.fromCharCode(ch);
+            } else {
+              str += `\\x${ch.toString(16).padStart(2, "0").toUpperCase()}`;
+            }
+          }
+          vars.push({ name, type: "string", value: str, length: len });
+          p += 3 + len;
+        } else if (type === 7) {
+          const name = String.fromCharCode(96 + letterCode);
+          const val = decodeSinclairFloat(
+            readByte(p + 1),
+            readByte(p + 2),
+            readByte(p + 3),
+            readByte(p + 4),
+            readByte(p + 5)
+          );
+          const limit = decodeSinclairFloat(
+            readByte(p + 6),
+            readByte(p + 7),
+            readByte(p + 8),
+            readByte(p + 9),
+            readByte(p + 10)
+          );
+          const step = decodeSinclairFloat(
+            readByte(p + 11),
+            readByte(p + 12),
+            readByte(p + 13),
+            readByte(p + 14),
+            readByte(p + 15)
+          );
+          const loopLine = readByte(p + 16) & 255 | (readByte(p + 17) & 255) << 8;
+          const loopStmt = readByte(p + 18) & 255;
+          vars.push({ name, type: "for", value: val, limit, step, loopLine, loopStmt });
+          p += 19;
+        } else if (type === 4 || type === 6) {
+          const isString = type === 6;
+          const name = String.fromCharCode(96 + letterCode) + (isString ? "$" : "");
+          const len = readByte(p + 1) & 255 | (readByte(p + 2) & 255) << 8;
+          vars.push({ name, type: isString ? "string-array" : "number-array", length: len });
+          p += 3 + len;
+        } else {
+          break;
+        }
+      }
+      return vars;
     }
-    const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
-    const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
-    const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
-    const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
-    const encoder = new TextEncoder();
-    await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
-    await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
-    await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
-    await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(all.sinclair.text));
-    basicCode = all.compact.text;
-  } else {
-    baseName = getBaseName(doc.uri, ".bas");
-    if (!baseName.endsWith(".sinclair")) {
-      const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
-      const encoder = new TextEncoder();
-      await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(translateWildcardsToChr(basicCode)));
+    function findDocumentLine2(documentText, targetBasicLine) {
+      if (typeof documentText !== "string" || typeof targetBasicLine !== "number") return -1;
+      const lines = documentText.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(/^\s*(\d+)/);
+        if (match && parseInt(match[1], 10) === targetBasicLine) {
+          return i;
+        }
+      }
+      return -1;
     }
+    function findStatementRange2(lineText, stmtIndex) {
+      if (typeof lineText !== "string") return { startCol: 0, endCol: 0 };
+      const prefixMatch = lineText.match(/^\s*\d+\s*/);
+      const codeStart = prefixMatch ? prefixMatch[0].length : 0;
+      let inString = false;
+      let inRem = false;
+      const segments = [];
+      let segStart = codeStart;
+      for (let i = codeStart; i < lineText.length; i++) {
+        const ch = lineText[i];
+        if (ch === '"') {
+          inString = !inString;
+        } else if (!inString && !inRem) {
+          if (lineText.slice(i, i + 3).toUpperCase() === "REM" && (i === codeStart || /\s|:/.test(lineText[i - 1]))) {
+            inRem = true;
+          } else if (ch === ":") {
+            segments.push({ startCol: segStart, endCol: i });
+            segStart = i + 1;
+            if (lineText[segStart] === " ") segStart++;
+          }
+        }
+      }
+      segments.push({ startCol: segStart, endCol: lineText.length });
+      const idx = Math.max(1, stmtIndex) - 1;
+      if (idx < segments.length) {
+        return segments[idx];
+      }
+      return { startCol: codeStart, endCol: lineText.length };
+    }
+    module2.exports = {
+      ROM48_STMT_ADDR,
+      ROM48_LOOP_ADDR,
+      decodeSinclairFloat,
+      readSpectrumVariables,
+      findDocumentLine: findDocumentLine2,
+      findStatementRange: findStatementRange2
+    };
   }
-  let autoStartLine = configuredAutoStart;
-  if (autoStartLine <= 0) {
-    const match = basicCode.match(/^\s*(\d+)/m);
-    autoStartLine = match ? parseInt(match[1], 10) : 10;
-  }
-  const blocks = bas2tap(basicCode, baseName, autoStartLine);
-  const tapBytes = tap2buffer(blocks);
-  const targetTapUri = vscode.Uri.joinPath(distUri, `${baseName}.tap`);
-  await vscode.workspace.fs.writeFile(targetTapUri, tapBytes);
-  return {
-    tapUri: targetTapUri,
-    autoStartLine,
-    tapBytes,
-    filename: `${baseName}.tap`
-  };
-}
-function getTurbo80Html(webview, extensionUri) {
-  const turbo80CoreUri = webview && extensionUri ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", "turbo80", "turbo80-core.js")) : "";
-  const turbo80Uri = webview && extensionUri ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", "turbo80", "turbo80.js")) : "";
-  const cspSource = webview && webview.cspSource ? webview.cspSource : "";
-  return `<!DOCTYPE html>
+});
+
+// src/core/turbo80Html.js
+var require_turbo80Html = __commonJS({
+  "src/core/turbo80Html.js"(exports2, module2) {
+    function getTurbo80Html2(webview, extensionUri, vscode2) {
+      const turbo80CoreUri = webview && extensionUri && vscode2 ? webview.asWebviewUri(vscode2.Uri.joinPath(extensionUri, "media", "turbo80", "turbo80-core.js")) : "";
+      const turbo80Uri = webview && extensionUri && vscode2 ? webview.asWebviewUri(vscode2.Uri.joinPath(extensionUri, "media", "turbo80", "turbo80.js")) : "";
+      const cspSource = webview && webview.cspSource ? webview.cspSource : "";
+      return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
@@ -2790,10 +2861,149 @@ function getTurbo80Html(webview, extensionUri) {
       display: flex;
       flex-direction: column;
     }
+    /* Sinclair BASIC Debugger Bar */
+    #debug-bar {
+      height: 38px;
+      background: #141420;
+      border-bottom: 1px solid #2a2a3e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1rem;
+      font-size: 12px;
+      color: #e9e9f2;
+      user-select: none;
+      flex-shrink: 0;
+      z-index: 1000;
+    }
+    .dbg-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    }
+    .dbg-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .dbg-badge.running {
+      background: rgba(87, 239, 158, 0.15);
+      color: #57ef9e;
+      border: 1px solid rgba(87, 239, 158, 0.4);
+    }
+    .dbg-badge.paused {
+      background: rgba(255, 204, 0, 0.2);
+      color: #ffcc00;
+      border: 1px solid rgba(255, 204, 0, 0.6);
+      box-shadow: 0 0 8px rgba(255, 204, 0, 0.3);
+    }
+    .dbg-pos {
+      color: #b0b0c8;
+      font-size: 11.5px;
+    }
+    .dbg-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .dbg-btn {
+      background: #1c1c2a;
+      color: #e2e2ee;
+      border: 1px solid #36364e;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11.5px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .dbg-btn:hover {
+      background: #2a2a40;
+      border-color: #5c5c8a;
+    }
+    .dbg-btn.primary {
+      background: #1e3355;
+      border-color: #37d0ff;
+      color: #ffffff;
+    }
+    .dbg-btn.primary:hover {
+      background: #284472;
+    }
+    .dbg-btn.danger {
+      background: #3e1b24;
+      border-color: #ff4766;
+      color: #ffffff;
+    }
+    .dbg-btn.danger:hover {
+      background: #552531;
+    }
+    #debug-vars-drawer {
+      position: absolute;
+      bottom: 34px;
+      left: 0;
+      right: 0;
+      max-height: 180px;
+      background: rgba(18, 18, 26, 0.96);
+      backdrop-filter: blur(8px);
+      border-top: 1px solid #323248;
+      display: flex;
+      flex-direction: column;
+      z-index: 1000;
+    }
+    .dbg-vars-header {
+      height: 28px;
+      background: #14141e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #9b9bb0;
+      border-bottom: 1px solid #28283a;
+    }
+    .dbg-vars-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 6px;
+      padding: 8px 12px;
+      overflow-y: auto;
+      max-height: 140px;
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+    }
+    .dbg-var-card {
+      background: #181826;
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid #2d2d42;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .dbg-var-name {
+      color: #37d0ff;
+      font-weight: 600;
+    }
+    .dbg-var-val {
+      color: #57ef9e;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 90px;
+    }
     #emulator-wrap {
       flex: 1;
+      min-height: 0;
       width: 100%;
-      height: calc(100% - 34px);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -2861,8 +3071,34 @@ function getTurbo80Html(webview, extensionUri) {
   </style>
 </head>
 <body>
+  <div id="debug-bar" style="display: none;">
+    <div class="dbg-left">
+      <span class="dbg-badge running" id="dbg-status-badge">\u25CF EJECUTANDO</span>
+      <span class="dbg-pos" id="dbg-pos">L\xEDnea --, Sent. --</span>
+    </div>
+    <div class="dbg-actions">
+      <button class="dbg-btn primary" id="btn-dbg-continue" title="Continuar ejecuci\xF3n (F5)">\u25B6 Continuar</button>
+      <button class="dbg-btn" id="btn-dbg-pause" title="Pausar ejecuci\xF3n (F6)" style="display: none;">\u23F8 Pausar</button>
+      <button class="dbg-btn" id="btn-dbg-stepline" title="Paso de L\xEDnea (F10)">\u21B7 L\xEDnea</button>
+      <button class="dbg-btn" id="btn-dbg-stepstmt" title="Paso de Sentencia (F11)">\u21F2 Sentencia</button>
+      <button class="dbg-btn" id="btn-dbg-restart" title="Reiniciar desde la l\xEDnea 1">\u{1F504} Reiniciar</button>
+      <button class="dbg-btn danger" id="btn-dbg-stop" title="Detener depuraci\xF3n">\u23F9 Detener</button>
+    </div>
+    <div class="dbg-right">
+      <button class="dbg-btn" id="btn-dbg-toggle-vars" title="Inspeccionar variables en memoria RAM">\u{1F4CB} Variables (<span id="dbg-var-count">0</span>)</button>
+    </div>
+  </div>
   <div id="emulator-wrap">
     <div id="spectrum" style="width: 100%;"></div>
+    <div id="debug-vars-drawer" style="display: none;">
+      <div class="dbg-vars-header">
+        <span>Variables en memoria (ZX Spectrum RAM)</span>
+        <button class="dbg-btn" id="btn-close-vars" style="padding: 1px 6px;">\u2715</button>
+      </div>
+      <div class="dbg-vars-grid" id="dbg-vars-list">
+        <div style="color: #727288; grid-column: 1/-1; padding: 6px 0;">Sin variables asignadas en RAM</div>
+      </div>
+    </div>
   </div>
   <footer id="footer">
     <div class="status-badge">
@@ -3032,14 +3268,333 @@ function getTurbo80Html(webview, extensionUri) {
       }
     }
 
+    function decodeSinclairFloat(b0, b1, b2, b3, b4) {
+      if (b0 === 0) {
+        const sign = (b1 === 0xFF) ? -1 : 1;
+        const val = (b2 & 0xFF) | ((b3 & 0xFF) << 8);
+        return sign * val;
+      }
+      const exp = b0 - 128;
+      const mant = (((b1 & 0x7F) | 0x80) * 0x1000000) +
+                   ((b2 & 0xFF) * 0x10000) +
+                   ((b3 & 0xFF) * 0x100) +
+                   (b4 & 0xFF);
+      let val = mant * Math.pow(2, exp - 31);
+      if (b1 & 0x80) val = -val;
+      return Math.round(val * 1000000) / 1000000;
+    }
+
+    function readSpectrumVariables(readByte) {
+      const varsStart = (readByte(0x5C4B) & 0xFF) | ((readByte(0x5C4C) & 0xFF) << 8);
+      const vars = [];
+      let p = varsStart;
+      const maxAddr = 0xFF00;
+
+      while (p < maxAddr) {
+        const b = readByte(p);
+        if (b === 0x80 || b === 0xFF || b === 0) break;
+
+        const type = (b >> 5) & 7;
+        const letterCode = b & 0x1F;
+
+        if (type === 3) {
+          const name = String.fromCharCode(96 + letterCode);
+          const val = decodeSinclairFloat(
+            readByte(p + 1), readByte(p + 2), readByte(p + 3), readByte(p + 4), readByte(p + 5)
+          );
+          vars.push({ name, type: 'number', value: val });
+          p += 6;
+        } else if (type === 5) {
+          let name = String.fromCharCode(96 + letterCode);
+          p++;
+          while (p < maxAddr) {
+            const c = readByte(p);
+            name += String.fromCharCode(c & 0x7F);
+            p++;
+            if (c & 0x80) break;
+          }
+          const val = decodeSinclairFloat(
+            readByte(p), readByte(p + 1), readByte(p + 2), readByte(p + 3), readByte(p + 4)
+          );
+          vars.push({ name, type: 'number', value: val });
+          p += 5;
+        } else if (type === 2) {
+          const name = String.fromCharCode(96 + letterCode) + '$';
+          const len = (readByte(p + 1) & 0xFF) | ((readByte(p + 2) & 0xFF) << 8);
+          let str = '';
+          for (let i = 0; i < len; i++) {
+            const ch = readByte(p + 3 + i);
+            if (ch >= 32 && ch <= 126) {
+              str += String.fromCharCode(ch);
+            } else {
+              str += String.fromCharCode(92) + 'x' + ch.toString(16).padStart(2, '0').toUpperCase();
+            }
+          }
+          vars.push({ name, type: 'string', value: str, length: len });
+          p += 3 + len;
+        } else if (type === 7) {
+          const name = String.fromCharCode(96 + letterCode);
+          const val = decodeSinclairFloat(
+            readByte(p + 1), readByte(p + 2), readByte(p + 3), readByte(p + 4), readByte(p + 5)
+          );
+          vars.push({ name, type: 'for', value: val });
+          p += 19;
+        } else if (type === 4 || type === 6) {
+          const isString = (type === 6);
+          const name = String.fromCharCode(96 + letterCode) + (isString ? '$' : '');
+          const len = (readByte(p + 1) & 0xFF) | ((readByte(p + 2) & 0xFF) << 8);
+          vars.push({ name, type: isString ? 'string-array' : 'number-array', length: len });
+          p += 3 + len;
+        } else {
+          break;
+        }
+      }
+      return vars;
+    }
+
+    const basicDebugger = {
+      enabled: false,
+      attached: false,
+      breakpoints: new Set(),
+      stepMode: null,
+      pauseRequested: false,
+      lastLine: null,
+      lastStmt: null,
+      lastPausedLine: null,
+      lastPausedStmt: null,
+      vars: [],
+
+      attach(sp) {
+        if (!sp || this.attached) return;
+        this.attached = true;
+        if (!sp.breakpoints) sp.breakpoints = new Set();
+        sp.breakpoints.add(0x1B3D);
+        if (!sp.bpConds) sp.bpConds = new Map();
+
+        sp.bpConds.set(0x1B3D, (cpu, spectrum) => {
+          if (!this.enabled) return false;
+
+          const line = spectrum.memory.read(0x5C45) | (spectrum.memory.read(0x5C46) << 8);
+          const stmt = spectrum.memory.read(0x5C47);
+
+          if (line >= 0x8000) return false;
+
+          if (this.stepMode === 'stmt') {
+            if (line !== this.lastLine || stmt !== this.lastStmt) {
+              this.stepMode = null;
+              this.onBreakHit(line, stmt, spectrum);
+              return true;
+            }
+            return false;
+          }
+
+          if (this.stepMode === 'line') {
+            if (line !== this.lastLine) {
+              this.stepMode = null;
+              this.onBreakHit(line, stmt, spectrum);
+              return true;
+            }
+            return false;
+          }
+
+          if (this.pauseRequested) {
+            this.pauseRequested = false;
+            this.onBreakHit(line, stmt, spectrum);
+            return true;
+          }
+
+          if (this.breakpoints.has(line)) {
+            if (line === this.lastPausedLine && stmt === this.lastPausedStmt) {
+              return false;
+            }
+            this.onBreakHit(line, stmt, spectrum);
+            return true;
+          }
+
+          return false;
+        });
+      },
+
+      onBreakHit(line, stmt, spectrum) {
+        this.lastPausedLine = line;
+        this.lastPausedStmt = stmt;
+        this.vars = readSpectrumVariables(a => spectrum.memory.read(a));
+
+        updateDebugUI('paused', line, stmt, this.vars);
+        vscode.postMessage({
+          command: 'basicPaused',
+          line: line,
+          stmt: stmt,
+          vars: this.vars
+        });
+      }
+    };
+
+    function updateDebugUI(status, line, stmt, vars) {
+      const bar = document.getElementById('debug-bar');
+      const badge = document.getElementById('dbg-status-badge');
+      const pos = document.getElementById('dbg-pos');
+      const varCount = document.getElementById('dbg-var-count');
+      const varsList = document.getElementById('dbg-vars-list');
+
+      if (!basicDebugger.enabled) {
+        bar.style.display = 'none';
+        return;
+      }
+
+      bar.style.display = 'flex';
+
+      if (status === 'paused') {
+        badge.className = 'dbg-badge paused';
+        badge.textContent = '\u25CF PAUSADO';
+        pos.textContent = 'L\xEDnea ' + line + ', Sent. ' + stmt;
+        document.getElementById('btn-dbg-continue').style.display = 'inline-flex';
+        document.getElementById('btn-dbg-pause').style.display = 'none';
+      } else {
+        badge.className = 'dbg-badge running';
+        badge.textContent = '\u25CF EJECUTANDO';
+        if (line != null) {
+          pos.textContent = 'L\xEDnea ' + line + '...';
+        }
+        document.getElementById('btn-dbg-continue').style.display = 'none';
+        document.getElementById('btn-dbg-pause').style.display = 'inline-flex';
+      }
+
+      if (vars) {
+        varCount.textContent = vars.length;
+        if (vars.length === 0) {
+          varsList.innerHTML = '<div style="color: #727288; grid-column: 1/-1; padding: 6px 0;">Sin variables asignadas en RAM</div>';
+        } else {
+          varsList.innerHTML = vars.map(v => {
+            const valStr = v.type === 'string' ? '"' + v.value + '"' : String(v.value);
+            return '<div class="dbg-var-card" title="' + v.name + ' (' + v.type + ') = ' + valStr + '">' +
+              '<span class="dbg-var-name">' + v.name + '</span>' +
+              '<span class="dbg-var-val">' + valStr + '</span>' +
+            '</div>';
+          }).join('');
+        }
+      }
+    }
+
+    function doContinue() {
+      if (emulator) {
+        basicDebugger.stepMode = null;
+        basicDebugger.pauseRequested = false;
+        updateDebugUI('running');
+        vscode.postMessage({ command: 'basicResumed' });
+        emulator.resume();
+      }
+    }
+
+    function doPause() {
+      basicDebugger.pauseRequested = true;
+    }
+
+    function doStepLine() {
+      if (emulator) {
+        basicDebugger.stepMode = 'line';
+        basicDebugger.lastLine = basicDebugger.lastPausedLine;
+        updateDebugUI('running', basicDebugger.lastPausedLine);
+        vscode.postMessage({ command: 'basicResumed' });
+        emulator.resume();
+      }
+    }
+
+    function doStepStmt() {
+      if (emulator) {
+        basicDebugger.stepMode = 'stmt';
+        basicDebugger.lastLine = basicDebugger.lastPausedLine;
+        basicDebugger.lastStmt = basicDebugger.lastPausedStmt;
+        updateDebugUI('running', basicDebugger.lastPausedLine);
+        vscode.postMessage({ command: 'basicResumed' });
+        emulator.resume();
+      }
+    }
+
+    function doRestart() {
+      if (pendingData) {
+        basicDebugger.pauseRequested = true;
+        applyTap(pendingData);
+      }
+    }
+
+    function doStop() {
+      basicDebugger.enabled = false;
+      document.getElementById('debug-bar').style.display = 'none';
+      document.getElementById('debug-vars-drawer').style.display = 'none';
+      vscode.postMessage({ command: 'debugStopped' });
+      if (emulator) emulator.resume();
+    }
+
+    document.getElementById('btn-dbg-continue').onclick = doContinue;
+    document.getElementById('btn-dbg-pause').onclick = doPause;
+    document.getElementById('btn-dbg-stepline').onclick = doStepLine;
+    document.getElementById('btn-dbg-stepstmt').onclick = doStepStmt;
+    document.getElementById('btn-dbg-restart').onclick = doRestart;
+    document.getElementById('btn-dbg-stop').onclick = doStop;
+
+    document.getElementById('btn-dbg-toggle-vars').onclick = function () {
+      const drawer = document.getElementById('debug-vars-drawer');
+      drawer.style.display = (drawer.style.display === 'none') ? 'flex' : 'none';
+    };
+    document.getElementById('btn-close-vars').onclick = function () {
+      document.getElementById('debug-vars-drawer').style.display = 'none';
+    };
+
+    window.addEventListener('keydown', function (e) {
+      if (!basicDebugger.enabled) return;
+      if (e.key === 'F5') { e.preventDefault(); doContinue(); }
+      else if (e.key === 'F6') { e.preventDefault(); doPause(); }
+      else if (e.key === 'F10') { e.preventDefault(); doStepLine(); }
+      else if (e.key === 'F11') { e.preventDefault(); doStepStmt(); }
+    });
+
+    function checkAttach() {
+      try {
+        const sp = emulator && emulator.main && emulator.main.spectrum;
+        if (sp) {
+          basicDebugger.attach(sp);
+        }
+      } catch (e) {}
+    }
+
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.command === 'loadTap') {
+        pendingData = msg;
+        if (msg.debug) {
+          basicDebugger.enabled = true;
+          if (Array.isArray(msg.breakpoints)) {
+            basicDebugger.breakpoints = new Set(msg.breakpoints);
+          }
+          if (msg.stopOnEntry || basicDebugger.breakpoints.size === 0) {
+            basicDebugger.pauseRequested = true;
+          }
+          updateDebugUI(basicDebugger.pauseRequested ? 'paused' : 'running', 1, 1, []);
+        } else {
+          basicDebugger.enabled = false;
+          updateDebugUI();
+        }
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
           applyTap(msg);
-        } else {
-          pendingData = msg;
+          checkAttach();
+          [50, 150, 300, 600, 1200, 2000].forEach(d => setTimeout(checkAttach, d));
         }
+      } else if (msg.command === 'setBreakpoints') {
+        const bps = Array.isArray(msg.breakpoints) ? msg.breakpoints : (Array.isArray(msg.lines) ? msg.lines : []);
+        basicDebugger.breakpoints = new Set(bps);
+      } else if (msg.command === 'debugContinue') {
+        doContinue();
+      } else if (msg.command === 'debugPause') {
+        doPause();
+      } else if (msg.command === 'debugStepLine') {
+        doStepLine();
+      } else if (msg.command === 'debugStepStmt') {
+        doStepStmt();
+      } else if (msg.command === 'debugRestart') {
+        doRestart();
+      } else if (msg.command === 'debugStop') {
+        doStop();
       }
     });
 
@@ -3047,6 +3602,8 @@ function getTurbo80Html(webview, extensionUri) {
       adjustEmulatorSizing();
       if (pendingData) {
         applyTap(pendingData);
+        checkAttach();
+        [50, 150, 300, 600, 1200, 2000].forEach(d => setTimeout(checkAttach, d));
         pendingData = null;
       }
       vscode.postMessage({ command: 'ready' });
@@ -3067,29 +3624,245 @@ function getTurbo80Html(webview, extensionUri) {
   <\/script>
 </body>
 </html>`;
+    }
+    module2.exports = {
+      getTurbo80Html: getTurbo80Html2
+    };
+  }
+});
+
+// src/webExtension.js
+var vscode = require("vscode");
+var { renumberProgram } = require_renumber();
+var { compileJBas, transpileJBasAllVersions } = require_jbas2bas();
+var { bas2tap, tap2buffer } = require_tapGenerator();
+var { formatKeywordsToUpper } = require_formatter();
+var { createSinclairCompletionProvider } = require_completions();
+var { translateWildcardsToChr } = require_wildcards();
+var { getBasFoldingRanges } = require_folding();
+var { findBasJumpTargetAtPosition, findBasLineIndex } = require_definitions();
+var { uploadTapToHost, buildTurbo80ShareUrl } = require_share();
+var {
+  findDocumentLine,
+  findStatementRange
+} = require_debugger();
+var { getTurbo80Html } = require_turbo80Html();
+function getBaseName(uri, extToRemove = "") {
+  const segments = uri.path.split("/");
+  const last = segments[segments.length - 1] || "program";
+  if (extToRemove && last.endsWith(extToRemove)) {
+    return last.slice(0, -extToRemove.length);
+  }
+  return last;
+}
+function getDistUri(docUri, outDirName = "dist") {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(docUri);
+  const rootUri = workspaceFolder ? workspaceFolder.uri : vscode.Uri.joinPath(docUri, "..");
+  return vscode.Uri.joinPath(rootUri, outDirName);
+}
+function uint8ArrayToBase64(bytes) {
+  let binary = "";
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return typeof btoa !== "undefined" ? btoa(binary) : Buffer.from(bytes).toString("base64");
+}
+async function getTargetDocument(uri) {
+  if (uri) {
+    try {
+      return await vscode.workspace.openTextDocument(uri);
+    } catch {
+    }
+  }
+  if (vscode.window.activeTextEditor) {
+    return vscode.window.activeTextEditor.document;
+  }
+  return null;
+}
+async function buildTapFromDocument(doc) {
+  const config = vscode.workspace.getConfiguration("sinclairBasic");
+  const configuredAutoStart = config.get("autoStartLine", 0);
+  const outDirName = config.get("outputDirectory", "dist");
+  const distUri = getDistUri(doc.uri, outDirName);
+  await vscode.workspace.fs.createDirectory(distUri);
+  let basicCode = doc.getText();
+  let baseName = "";
+  if (doc.fileName.endsWith(".jbas")) {
+    baseName = getBaseName(doc.uri, ".jbas");
+    const all = transpileJBasAllVersions(basicCode);
+    if (!all.success) {
+      throw new Error("Compilation failed:\n" + all.errors.join("\n"));
+    }
+    const compactUri = vscode.Uri.joinPath(distUri, `${baseName}.bas`);
+    const step10Uri = vscode.Uri.joinPath(distUri, `${baseName}-step10.bas`);
+    const commentsUri = vscode.Uri.joinPath(distUri, `${baseName}-comments.bas`);
+    const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
+    const encoder = new TextEncoder();
+    await vscode.workspace.fs.writeFile(compactUri, encoder.encode(all.compact.text));
+    await vscode.workspace.fs.writeFile(step10Uri, encoder.encode(all.step10.text));
+    await vscode.workspace.fs.writeFile(commentsUri, encoder.encode(all.comments.text));
+    await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(all.sinclair.text));
+    basicCode = all.compact.text;
+  } else {
+    baseName = getBaseName(doc.uri, ".bas");
+    if (!baseName.endsWith(".sinclair")) {
+      const sinclairUri = vscode.Uri.joinPath(distUri, `${baseName}.sinclair.bas`);
+      const encoder = new TextEncoder();
+      await vscode.workspace.fs.writeFile(sinclairUri, encoder.encode(translateWildcardsToChr(basicCode)));
+    }
+  }
+  let autoStartLine = configuredAutoStart;
+  if (autoStartLine <= 0) {
+    const match = basicCode.match(/^\s*(\d+)/m);
+    autoStartLine = match ? parseInt(match[1], 10) : 10;
+  }
+  const blocks = bas2tap(basicCode, baseName, autoStartLine);
+  const tapBytes = tap2buffer(blocks);
+  const targetTapUri = vscode.Uri.joinPath(distUri, `${baseName}.tap`);
+  await vscode.workspace.fs.writeFile(targetTapUri, tapBytes);
+  return {
+    tapUri: targetTapUri,
+    autoStartLine,
+    tapBytes,
+    filename: `${baseName}.tap`
+  };
 }
 function activate(context) {
   let currentTurbo80Panel = null;
-  function runTurbo80Webview(tapBytes, filename) {
+  let activeDebugDoc = null;
+  let activeDebugLine = null;
+  let activeDebugStmt = null;
+  let activeDebugVars = [];
+  let isDebuggingActive = false;
+  const debugLineDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    backgroundColor: "rgba(255, 215, 0, 0.22)",
+    overviewRulerColor: "rgba(255, 215, 0, 0.85)",
+    overviewRulerLane: vscode.OverviewRulerLane.Full
+  });
+  const debugStmtDecoration = vscode.window.createTextEditorDecorationType({
+    backgroundColor: "rgba(255, 204, 0, 0.45)",
+    borderRadius: "3px",
+    border: "1px solid rgba(255, 204, 0, 0.9)"
+  });
+  const debugStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  function getBreakpointsForDocument(document) {
+    if (!document) return [];
+    const uriStr = document.uri.toString();
+    const bps = vscode.debug.breakpoints.filter(
+      (b) => b instanceof vscode.SourceBreakpoint && b.location.uri.toString() === uriStr && b.enabled !== false
+    );
+    const basicLines = [];
+    for (const bp of bps) {
+      const lineIndex = bp.location.range.start.line;
+      if (lineIndex < document.lineCount) {
+        const lineText = document.lineAt(lineIndex).text;
+        const m = lineText.match(/^\s*(\d+)/);
+        if (m) {
+          basicLines.push(parseInt(m[1], 10));
+        }
+      }
+    }
+    return basicLines;
+  }
+  function clearDebugDecorations() {
+    vscode.window.visibleTextEditors.forEach((editor) => {
+      editor.setDecorations(debugLineDecoration, []);
+      editor.setDecorations(debugStmtDecoration, []);
+    });
+  }
+  function highlightDebugPosition(doc, basicLine, stmt) {
+    clearDebugDecorations();
+    if (!doc) return;
+    const docLine = findDocumentLine(doc.getText(), basicLine);
+    if (docLine < 0 || docLine >= doc.lineCount) return;
+    const lineText = doc.lineAt(docLine).text;
+    const lineRange = new vscode.Range(docLine, 0, docLine, lineText.length);
+    const stmtRangeObj = findStatementRange(lineText, stmt);
+    const stmtRange = new vscode.Range(docLine, stmtRangeObj.startCol, docLine, stmtRangeObj.endCol);
+    const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === doc.uri.toString());
+    if (editor) {
+      editor.setDecorations(debugLineDecoration, [lineRange]);
+      editor.setDecorations(debugStmtDecoration, [stmtRange]);
+      editor.revealRange(lineRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    } else {
+      vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preserveFocus: true }).then((ed) => {
+        ed.setDecorations(debugLineDecoration, [lineRange]);
+        ed.setDecorations(debugStmtDecoration, [stmtRange]);
+        ed.revealRange(lineRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      }, () => {
+      });
+    }
+  }
+  function handleBasicPaused(line, stmt, vars) {
+    activeDebugLine = line;
+    activeDebugStmt = stmt;
+    activeDebugVars = Array.isArray(vars) ? vars : [];
+    vscode.commands.executeCommand("setContext", "sinclairBasic.isDebugging", true);
+    vscode.commands.executeCommand("setContext", "sinclairBasic.isPaused", true);
+    debugStatusBarItem.text = `$(debug-pause) BASIC: L\xEDnea ${line} (Sent. ${stmt})`;
+    debugStatusBarItem.tooltip = `Sinclair BASIC pausado en l\xEDnea ${line}, sentencia ${stmt}.
+Haz clic para inspeccionar variables en RAM.`;
+    debugStatusBarItem.command = "sinclairBasic.showDebugVariables";
+    debugStatusBarItem.show();
+    if (activeDebugDoc) {
+      highlightDebugPosition(activeDebugDoc, line, stmt);
+    }
+  }
+  function handleBasicResumed() {
+    clearDebugDecorations();
+    vscode.commands.executeCommand("setContext", "sinclairBasic.isPaused", false);
+    if (isDebuggingActive) {
+      debugStatusBarItem.text = "$(play) BASIC: Ejecutando...";
+      debugStatusBarItem.tooltip = "Sinclair BASIC en ejecuci\xF3n en Turbo80";
+      debugStatusBarItem.show();
+    }
+  }
+  function handleDebugStopped() {
+    isDebuggingActive = false;
+    activeDebugDoc = null;
+    activeDebugLine = null;
+    activeDebugStmt = null;
+    activeDebugVars = [];
+    clearDebugDecorations();
+    debugStatusBarItem.hide();
+    vscode.commands.executeCommand("setContext", "sinclairBasic.isDebugging", false);
+    vscode.commands.executeCommand("setContext", "sinclairBasic.isPaused", false);
+  }
+  function runTurbo80Webview(tapBytes, filename, options = {}) {
     const config = vscode.workspace.getConfiguration("sinclairBasic");
     const model = config.get("turbo80Model", "48k") || "48k";
     const crt = config.get("turbo80Crt", true);
     const base64 = uint8ArrayToBase64(tapBytes);
+    const isDebug = !!options.debug;
+    const breakpoints = Array.isArray(options.breakpoints) ? options.breakpoints : [];
+    const stopOnEntry = options.stopOnEntry !== void 0 ? options.stopOnEntry : breakpoints.length === 0;
+    if (isDebug) {
+      isDebuggingActive = true;
+      activeDebugDoc = options.doc || null;
+      vscode.commands.executeCommand("setContext", "sinclairBasic.isDebugging", true);
+      debugStatusBarItem.text = "$(play) BASIC: Iniciando depurador...";
+      debugStatusBarItem.show();
+    }
     const payload = {
       command: "loadTap",
       base64,
       filename,
       model,
-      crt
+      crt,
+      debug: isDebug,
+      breakpoints,
+      stopOnEntry
     };
     if (currentTurbo80Panel) {
       currentTurbo80Panel.reveal(vscode.ViewColumn.Beside, false);
-      currentTurbo80Panel.title = `ZX: ${filename}`;
+      currentTurbo80Panel.title = `ZX: ${filename}${isDebug ? " (Debug)" : ""}`;
       currentTurbo80Panel.webview.postMessage(payload);
     } else {
       currentTurbo80Panel = vscode.window.createWebviewPanel(
         "sinclairBasicTurbo80",
-        `ZX: ${filename}`,
+        `ZX: ${filename}${isDebug ? " (Debug)" : ""}`,
         {
           viewColumn: vscode.ViewColumn.Beside,
           preserveFocus: false
@@ -3102,16 +3875,108 @@ function activate(context) {
           ]
         }
       );
-      currentTurbo80Panel.webview.html = getTurbo80Html(currentTurbo80Panel.webview, context.extensionUri);
+      currentTurbo80Panel.webview.html = getTurbo80Html(currentTurbo80Panel.webview, context.extensionUri, vscode);
       currentTurbo80Panel.webview.onDidReceiveMessage((message) => {
         if (message.command === "ready") {
           currentTurbo80Panel.webview.postMessage(payload);
+        } else if (message.command === "basicPaused") {
+          handleBasicPaused(message.line, message.stmt, message.vars);
+        } else if (message.command === "basicResumed") {
+          handleBasicResumed();
+        } else if (message.command === "debugStopped") {
+          handleDebugStopped();
         }
       });
       currentTurbo80Panel.onDidDispose(() => {
         currentTurbo80Panel = null;
+        handleDebugStopped();
       });
     }
+  }
+  async function handleDebugTurbo80(uri) {
+    const doc = await getTargetDocument(uri);
+    if (!doc) {
+      vscode.window.showInformationMessage("No active editor or Sinclair BASIC file selected.");
+      return;
+    }
+    let res = null;
+    if (doc.fileName.endsWith(".jbas")) {
+      res = await handleCompileJBas(uri);
+    } else if (doc.fileName.endsWith(".bas")) {
+      res = await handleCompileBas(uri);
+    } else {
+      vscode.window.showWarningMessage("Please select a .bas or .jbas file to debug.");
+      return;
+    }
+    if (!res) return;
+    const breakpoints = getBreakpointsForDocument(doc);
+    runTurbo80Webview(res.tapBytes, res.filename, {
+      debug: true,
+      breakpoints,
+      doc
+    });
+  }
+  function handleDebugContinue() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: "debugContinue" });
+    }
+  }
+  function handleDebugPause() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: "debugPause" });
+    }
+  }
+  function handleDebugStepLine() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: "debugStepLine" });
+    }
+  }
+  function handleDebugStepStmt() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: "debugStepStmt" });
+    }
+  }
+  function handleDebugRestart() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: "debugRestart" });
+    }
+  }
+  function handleDebugStop() {
+    if (currentTurbo80Panel) {
+      currentTurbo80Panel.webview.postMessage({ command: "debugStop" });
+    }
+    handleDebugStopped();
+  }
+  function handleToggleBreakpoint() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const uri = editor.document.uri;
+    const line = editor.selection.active.line;
+    const existing = vscode.debug.breakpoints.find(
+      (b) => b instanceof vscode.SourceBreakpoint && b.location.uri.toString() === uri.toString() && b.location.range.start.line === line
+    );
+    if (existing) {
+      vscode.debug.removeBreakpoints([existing]);
+    } else {
+      vscode.debug.addBreakpoints([
+        new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line, 0)))
+      ]);
+    }
+  }
+  async function handleShowDebugVariables() {
+    if (!isDebuggingActive || activeDebugVars.length === 0) {
+      vscode.window.showInformationMessage("Sin variables activas en RAM del ZX Spectrum en este momento.");
+      return;
+    }
+    const items = activeDebugVars.map((v) => ({
+      label: `${v.name} = ${v.type === "string" ? '"' + v.value + '"' : v.value}`,
+      description: `Tipo: ${v.type}${v.length !== void 0 ? ` (longitud: ${v.length})` : ""}`,
+      detail: `L\xEDnea actual: ${activeDebugLine}, Sentencia: ${activeDebugStmt}`
+    }));
+    await vscode.window.showQuickPick(items, {
+      title: `Variables ZX Spectrum (L\xEDnea ${activeDebugLine}, Sentencia ${activeDebugStmt})`,
+      placeHolder: "Inspecci\xF3n de variables en memoria RAM"
+    });
   }
   async function handleRenumber(uri) {
     let editor = vscode.window.activeTextEditor;
@@ -3581,6 +4446,50 @@ ${shareUrl}`,
     vscode.commands.registerCommand("sinclairBasic.runTurbo80", handleRunTurbo80),
     vscode.commands.registerCommand("sinclairBasic.runExternalEmulator", handleRunExternalEmulator),
     vscode.commands.registerCommand("sinclairBasic.shareTurbo80", handleShareTurbo80),
+    // Debugger commands for Sinclair BASIC (48K step-by-step & variables)
+    vscode.commands.registerCommand("sinclairBasic.debugTurbo80", handleDebugTurbo80),
+    vscode.commands.registerCommand("sinclairBasic.debugContinue", handleDebugContinue),
+    vscode.commands.registerCommand("sinclairBasic.debugPause", handleDebugPause),
+    vscode.commands.registerCommand("sinclairBasic.debugStepLine", handleDebugStepLine),
+    vscode.commands.registerCommand("sinclairBasic.debugStepStmt", handleDebugStepStmt),
+    vscode.commands.registerCommand("sinclairBasic.debugRestart", handleDebugRestart),
+    vscode.commands.registerCommand("sinclairBasic.debugStop", handleDebugStop),
+    vscode.commands.registerCommand("sinclairBasic.toggleBreakpoint", handleToggleBreakpoint),
+    vscode.commands.registerCommand("sinclairBasic.showDebugVariables", handleShowDebugVariables),
+    vscode.debug.registerDebugConfigurationProvider("sinclair-basic", {
+      provideDebugConfigurations() {
+        return [
+          {
+            type: "sinclair-basic",
+            request: "launch",
+            name: "Debug Sinclair BASIC (Turbo80)"
+          }
+        ];
+      },
+      resolveDebugConfiguration(folder, config) {
+        handleDebugTurbo80();
+        return void 0;
+      }
+    }),
+    debugStatusBarItem,
+    debugLineDecoration,
+    debugStmtDecoration,
+    vscode.debug.onDidChangeBreakpoints(() => {
+      if (isDebuggingActive && activeDebugDoc && currentTurbo80Panel) {
+        const bps = getBreakpointsForDocument(activeDebugDoc);
+        currentTurbo80Panel.webview.postMessage({
+          command: "setBreakpoints",
+          breakpoints: bps
+        });
+      }
+    }),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (isDebuggingActive && activeDebugDoc && editor && editor.document.uri.toString() === activeDebugDoc.uri.toString()) {
+        if (activeDebugLine !== null && activeDebugStmt !== null) {
+          highlightDebugPosition(activeDebugDoc, activeDebugLine, activeDebugStmt);
+        }
+      }
+    }),
     vscode.commands.registerCommand("sinclairBasic.selectBas2tap", () => vscode.window.showInformationMessage("Executable path selection is only available on desktop.")),
     vscode.commands.registerCommand("sinclairBasic.selectEmulator", () => vscode.window.showInformationMessage("Executable path selection is only available on desktop.")),
     jbasLanguageConfig,

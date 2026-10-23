@@ -81,6 +81,35 @@
         "path": "./syntaxes/jbas.tmLanguage.json"
       }
     ],
+    "debuggers": [
+      {
+        "type": "sinclair-basic",
+        "label": "Sinclair BASIC (Turbo80)",
+        "languages": [
+          "sinclair-basic",
+          "jbas"
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Sinclair BASIC: Debug in Turbo80",
+            "description": "Debug active Sinclair BASIC file in Turbo80 emulator",
+            "body": {
+              "type": "sinclair-basic",
+              "request": "launch",
+              "name": "Debug Sinclair BASIC (Turbo80)"
+            }
+          }
+        ]
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "sinclair-basic"
+      },
+      {
+        "language": "jbas"
+      }
+    ],
     "commands": [
       {
         "command": "sinclairBasic.compileJBas",
@@ -163,6 +192,60 @@
         "title": "Share on Turbo80.com (Get Web Link)",
         "category": "Sinclair BASIC",
         "icon": "$(broadcast)"
+      },
+      {
+        "command": "sinclairBasic.debugTurbo80",
+        "title": "Debug in Web Emulator (Turbo80)",
+        "category": "Sinclair BASIC",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "sinclairBasic.debugContinue",
+        "title": "Debug: Continue / Resume",
+        "category": "Sinclair BASIC",
+        "icon": "$(play)"
+      },
+      {
+        "command": "sinclairBasic.debugPause",
+        "title": "Debug: Pause",
+        "category": "Sinclair BASIC",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "sinclairBasic.debugStepLine",
+        "title": "Debug: Step Line (Over)",
+        "category": "Sinclair BASIC",
+        "icon": "$(debug-step-over)"
+      },
+      {
+        "command": "sinclairBasic.debugStepStmt",
+        "title": "Debug: Step Statement (Into)",
+        "category": "Sinclair BASIC",
+        "icon": "$(debug-step-into)"
+      },
+      {
+        "command": "sinclairBasic.debugRestart",
+        "title": "Debug: Restart",
+        "category": "Sinclair BASIC",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "sinclairBasic.debugStop",
+        "title": "Debug: Stop Debugging",
+        "category": "Sinclair BASIC",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "sinclairBasic.toggleBreakpoint",
+        "title": "Debug: Toggle Breakpoint on Line",
+        "category": "Sinclair BASIC",
+        "icon": "$(debug-breakpoint)"
+      },
+      {
+        "command": "sinclairBasic.showDebugVariables",
+        "title": "Debug: Inspect Variables",
+        "category": "Sinclair BASIC",
+        "icon": "$(list-unordered)"
       }
     ],
     "menus": {
@@ -193,9 +276,14 @@
           "group": "navigation@3"
         },
         {
-          "command": "sinclairBasic.shareTurbo80",
+          "command": "sinclairBasic.debugTurbo80",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "navigation@4"
+        },
+        {
+          "command": "sinclairBasic.shareTurbo80",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "navigation@5"
         }
       ],
       "editor/context": [
@@ -228,6 +316,16 @@
           "command": "sinclairBasic.runEmulator",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "2_build@2"
+        },
+        {
+          "command": "sinclairBasic.debugTurbo80",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "2_build@2.5"
+        },
+        {
+          "command": "sinclairBasic.toggleBreakpoint",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "2_build@2.6"
         },
         {
           "command": "sinclairBasic.shareTurbo80",
@@ -265,6 +363,11 @@
           "command": "sinclairBasic.runEmulator",
           "when": "resourceExtname == .bas || resourceExtname == .jbas",
           "group": "sinclair@4"
+        },
+        {
+          "command": "sinclairBasic.debugTurbo80",
+          "when": "resourceExtname == .bas || resourceExtname == .jbas",
+          "group": "sinclair@4.5"
         },
         {
           "command": "sinclairBasic.shareTurbo80",
@@ -308,6 +411,48 @@
         "command": "sinclairBasic.runEmulator",
         "key": "ctrl+f5",
         "mac": "cmd+f5",
+        "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
+      },
+      {
+        "command": "sinclairBasic.debugTurbo80",
+        "key": "f5",
+        "mac": "f5",
+        "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas) && !sinclairBasic.isDebugging"
+      },
+      {
+        "command": "sinclairBasic.debugContinue",
+        "key": "f5",
+        "mac": "f5",
+        "when": "sinclairBasic.isDebugging"
+      },
+      {
+        "command": "sinclairBasic.debugPause",
+        "key": "f6",
+        "mac": "f6",
+        "when": "sinclairBasic.isDebugging"
+      },
+      {
+        "command": "sinclairBasic.debugStepLine",
+        "key": "f10",
+        "mac": "f10",
+        "when": "sinclairBasic.isDebugging"
+      },
+      {
+        "command": "sinclairBasic.debugStepStmt",
+        "key": "f11",
+        "mac": "f11",
+        "when": "sinclairBasic.isDebugging"
+      },
+      {
+        "command": "sinclairBasic.debugStop",
+        "key": "shift+f5",
+        "mac": "shift+f5",
+        "when": "sinclairBasic.isDebugging"
+      },
+      {
+        "command": "sinclairBasic.toggleBreakpoint",
+        "key": "f9",
+        "mac": "f9",
         "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
       }
     ],
