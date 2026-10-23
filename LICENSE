@@ -22,14 +22,44 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 2. ATRIBUCIÓN Y MENCIÓN ESPECIAL / ACKNOWLEDGEMENTS & ATTRIBUTIONS
 ===============================================================================
 
-Este proyecto integra y utiliza el emulador de ZX Spectrum Turbo80 para la
-ejecución en entorno web y la compartición interactiva de cintas .tap.
+Este proyecto integra y distribuye localmente el emulador de ZX Spectrum
+Turbo80 (versión embebible sin conexión / offline) para la ejecución en
+entorno web (Webview) y la compartición interactiva de cintas .tap.
 
 * Emulador: Turbo80 (https://turbo80.com)
 * Autor del emulador: José Enrique García (Incinerator)
 * Mención y atribución: Reconocimiento y agradecimiento especial a José Enrique
   García por la creación y desarrollo de Turbo80, haciendo posible la emulación
-  fiel de Sinclair ZX Spectrum en navegadores modernos.
+  fiel de Sinclair ZX Spectrum en navegadores modernos y su distribución offline.
+
+CRÉDITOS Y ASPECTOS LEGALES DE LAS ROMS (TURBO80):
+El paquete emulador Turbo80 incluye imágenes de ROM de sistemas y periféricos
+bajo las siguientes condiciones y autorizaciones de sus respectivos titulares:
+
+- Amstrad: Titular de las ROMs de los ordenadores Sinclair ZX Spectrum (16K,
+  48K, Spectrum+, 128K) y de los modelos Amstrad (+2, +2A, +3) (© 1982-1987
+  Sinclair Research Ltd / Amstrad), que permite amablemente su redistribución
+  para su uso con emuladores reteniendo todos sus derechos de autor:
+  "Amstrad have kindly given their permission for the redistribution of their
+  copyrighted material but retain that copyright".
+
+- Timex: Las ROMs de los modelos Timex TC2048, TC2068 y TS2068 son las de
+  Sinclair con modificaciones realizadas por Timex, las cuales se encuentran
+  en el dominio público.
+
+- Interface 1: La ROM de la interfaz ZX Interface 1 es © 1983 Sinclair Research
+  Ltd y se distribuye sin modificar.
+
+- esxDOS: La ROM y tarjeta SD para DivMMC (esxDOS 0.8.9, © 2005-2021 Papaya
+  Dezign y colaboradores, https://esxdos.org/) se incluyen con el permiso
+  expreso de Miguel Guerreiro y Papaya Dezign.
+
+- +D y DISCiPLE: Las ROMs de las interfaces de disco MGT (+D y DISCiPLE, de
+  Miles Gordon Technology) se incluyen con permiso de Datel, titular de sus
+  derechos. Los sistemas G+DOS y GDOS no van incluidos en el paquete.
+
+- Base de datos y metadatos: Agradecimiento a ZXDB (Einar Saukas y colaboradores,
+  bajo Open Database License ODbL 1.0) y a World of Spectrum.
 
 ===============================================================================
 3. RENUNCIA DE GARANTÍA / DISCLAIMER OF WARRANTY (AS IS)

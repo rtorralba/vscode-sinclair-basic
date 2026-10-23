@@ -155,7 +155,14 @@ You can customize the extension via VS Code Settings (`settings.json`):
 
 ## Acknowledgements & Credits
 
-* **Turbo80**: The built-in web emulator is powered by [Turbo80](https://turbo80.com) created by José Enrique García (Incinerator). We are deeply grateful for this wonderful web-based ZX Spectrum emulator.
+* **Turbo80 (Built-in Offline ZX Spectrum Emulator)**: Powered by [Turbo80](https://turbo80.com) created by **José Enrique García (Incinerator)**. Bundled locally for 100% offline emulation without requiring an active internet connection.
+* **ROMs & Legal Notice**:
+  * **Amstrad**: Copyright holder of the Sinclair ZX Spectrum (16K, 48K, Spectrum+, 128K) and Amstrad (+2, +2A, +3) ROMs (© 1982-1987 Sinclair Research Ltd / Amstrad), with permission kindly granted for redistribution with emulators (*"Amstrad have kindly given their permission for the redistribution of their copyrighted material but retain that copyright"*).
+  * **Timex**: TC2048, TC2068, and TS2068 ROM modifications are in the public domain.
+  * **Interface 1**: ROM is © 1983 Sinclair Research Ltd.
+  * **esxDOS**: esxDOS 0.8.9 (© 2005-2021 Papaya Dezign, Miguel Guerreiro, https://esxdos.org/) included with permission.
+  * **+D and DISCiPLE**: ROMs included with permission from Datel.
+  * **ZXDB**: Software metadata powered by [ZXDB](https://github.com/zxdb/ZXDB) (Einar Saukas and contributors, ODbL 1.0) and World of Spectrum.
 
 ---
 
@@ -189,4 +196,5 @@ Copyright (C) 2026 **Raül Torralba**.
 See the full [LICENSE](LICENSE) file for complete details.
 
 ### Acknowledgements & Special Attribution / Mención Especial
-* **Turbo80**: Built-in ZX Spectrum web emulation and instant game sharing powered by [Turbo80](https://turbo80.com), created by **José Enrique García (Incinerator)**. Special thanks and attribution for his outstanding contribution to the retrocomputing community.
+* **Turbo80**: Built-in 100% offline ZX Spectrum web emulation and instant game sharing powered by [Turbo80](https://turbo80.com), created by **José Enrique García (Incinerator)**. Special thanks and attribution for his outstanding contribution to the retrocomputing community.
+* **Amstrad & Hardware Rights Holders**: Warm appreciation to Amstrad, Datel, and Papaya Dezign for permitting the inclusion of original ROMs in retrocomputing emulators.

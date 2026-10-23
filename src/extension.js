@@ -312,7 +312,15 @@ function activate(context) {
   // Webview panel reference for Turbo80
   let currentTurbo80Panel = null;
 
-  function getTurbo80Html() {
+  function getTurbo80Html(webview, extensionUri) {
+    const turbo80CoreUri = (webview && extensionUri)
+      ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'turbo80', 'turbo80-core.js'))
+      : '';
+    const turbo80Uri = (webview && extensionUri)
+      ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'turbo80', 'turbo80.js'))
+      : '';
+    const cspSource = (webview && webview.cspSource) ? webview.cspSource : '';
+
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -320,11 +328,12 @@ function activate(context) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'none';
-    script-src 'unsafe-inline' https://turbo80.com;
+    script-src 'unsafe-inline' 'unsafe-eval' ${cspSource} https://turbo80.com;
     frame-src https://turbo80.com;
-    style-src 'unsafe-inline';
-    img-src https: data:;
-    connect-src https://turbo80.com;
+    style-src 'unsafe-inline' ${cspSource};
+    img-src https: data: ${cspSource};
+    font-src ${cspSource} data:;
+    connect-src https://turbo80.com ${cspSource} data: blob:;
   ">
   <title>Turbo80 - ZX Spectrum</title>
   <style>
@@ -349,20 +358,22 @@ function activate(context) {
       align-items: center;
       justify-content: center;
       position: relative;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     #spectrum {
-      width: 100%;
-      height: 100%;
+      width: 100% !important;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
     }
     #spectrum iframe {
       border: 0;
-      width: 100%;
-      height: 100%;
+      width: 100% !important;
+      height: auto !important;
+      aspect-ratio: 4 / 3 !important;
       max-width: 100vw;
-      max-height: 100vh;
     }
     #footer {
       height: 34px;
@@ -411,7 +422,7 @@ function activate(context) {
 </head>
 <body>
   <div id="emulator-wrap">
-    <div id="spectrum"></div>
+    <div id="spectrum" style="width: 100%;"></div>
   </div>
   <footer id="footer">
     <div class="status-badge">
@@ -423,16 +434,55 @@ function activate(context) {
     </div>
   </footer>
 
-  <script src="https://turbo80.com/turbo80.js"></script>
+  <script src="${turbo80CoreUri}"></script>
+  <script src="${turbo80Uri}"></script>
+  <script>
+    if (typeof Turbo80 === 'undefined') {
+      const s = document.createElement('script');
+      s.src = 'https://turbo80.com/turbo80.js';
+      document.head.appendChild(s);
+    }
+  </script>
   <script>
     const vscode = acquireVsCodeApi();
     let emulator = null;
     let pendingData = null;
 
+    function adjustEmulatorSizing() {
+      const spectrum = document.getElementById('spectrum');
+      if (!spectrum) return;
+      const shadow = spectrum.shadowRoot;
+      if (shadow && !shadow.getElementById('t80-responsive-size')) {
+        const style = document.createElement('style');
+        style.id = 't80-responsive-size';
+        style.textContent = [
+          ':host { width: 100% !important; max-width: 100% !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; }',
+          '.t80-body { width: 100% !important; max-width: 100% !important; min-height: 0 !important; height: auto !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; background: transparent !important; }',
+          'main { width: 100% !important; max-width: 100% !important; min-height: 0 !important; height: auto !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; margin: 0 !important; padding: 0 !important; }',
+          '.screen-zone { width: 100% !important; max-width: 100% !important; height: auto !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; gap: 0 !important; }',
+          '.bezel { width: 100% !important; max-width: 100% !important; height: auto !important; margin: 0 !important; padding: 0 !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; }',
+          '.screen-wrap { width: 100% !important; max-width: 100% !important; height: auto !important; aspect-ratio: 4 / 3 !important; margin: 0 auto !important; }',
+          '#screen { width: 100% !important; max-width: 100% !important; height: auto !important; aspect-ratio: 4 / 3 !important; display: block !important; }',
+          '#crt-gl { width: 100% !important; height: 100% !important; }'
+        ].join('\\n');
+        shadow.appendChild(style);
+      }
+    }
+
     function focusEmulator() {
       try {
         if (emulator && typeof emulator.focus === 'function') {
           emulator.focus();
+        }
+      } catch (e) {}
+      try {
+        const shadow = (document.querySelector('#spectrum') && document.querySelector('#spectrum').shadowRoot) || (emulator && emulator.shadow);
+        const screen = shadow ? (shadow.getElementById('screen') || shadow.querySelector('canvas')) : document.querySelector('#spectrum canvas');
+        if (screen) {
+          if (!screen.hasAttribute('tabindex')) {
+            screen.setAttribute('tabindex', '0');
+          }
+          screen.focus();
         }
       } catch (e) {}
       try {
@@ -465,10 +515,14 @@ function activate(context) {
     }
 
     function scheduleFocus() {
+      adjustEmulatorSizing();
       focusEmulator();
       attachIframeListeners();
       [50, 150, 300, 500, 800, 1200, 1800].forEach(delay => {
-        setTimeout(focusEmulator, delay);
+        setTimeout(() => {
+          adjustEmulatorSizing();
+          focusEmulator();
+        }, delay);
       });
     }
 
@@ -494,11 +548,17 @@ function activate(context) {
             name: data.filename || 'game.tap',
             model: currentModel,
             crt: data.crt ? 'on' : 'off',
-            iframe: true
+            width: '100%'
           });
           if (emulator && typeof emulator.on === 'function') {
-            emulator.on('ready', scheduleFocus);
-            emulator.on('loaded', scheduleFocus);
+            emulator.on('ready', () => {
+              adjustEmulatorSizing();
+              scheduleFocus();
+            });
+            emulator.on('loaded', () => {
+              adjustEmulatorSizing();
+              scheduleFocus();
+            });
           }
           attachIframeListeners();
         } else {
@@ -509,16 +569,22 @@ function activate(context) {
                 if (emulator.reset) emulator.reset();
                 return doLoad();
               })
-              .then(() => { scheduleFocus(); })
+              .then(() => {
+                adjustEmulatorSizing();
+                scheduleFocus();
+              })
               .catch(() => {
                 doLoad();
+                adjustEmulatorSizing();
                 scheduleFocus();
               });
           } else {
             doLoad();
+            adjustEmulatorSizing();
             scheduleFocus();
           }
         }
+        adjustEmulatorSizing();
         scheduleFocus();
       } catch (err) {
         console.error('Error loading TAP into Turbo80:', err);
@@ -538,12 +604,16 @@ function activate(context) {
     });
 
     window.addEventListener('DOMContentLoaded', () => {
+      adjustEmulatorSizing();
       if (pendingData) {
         applyTap(pendingData);
         pendingData = null;
       }
       vscode.postMessage({ command: 'ready' });
     });
+
+    window.addEventListener('resize', adjustEmulatorSizing);
+    setInterval(adjustEmulatorSizing, 250);
 
     window.addEventListener('focus', focusEmulator);
     window.addEventListener('pointerdown', focusEmulator);
@@ -589,11 +659,14 @@ function activate(context) {
         },
         {
           enableScripts: true,
-          retainContextWhenHidden: true
+          retainContextWhenHidden: true,
+          localResourceRoots: [
+            vscode.Uri.joinPath(context.extensionUri, 'media')
+          ]
         }
       );
 
-      currentTurbo80Panel.webview.html = getTurbo80Html();
+      currentTurbo80Panel.webview.html = getTurbo80Html(currentTurbo80Panel.webview, context.extensionUri);
 
       currentTurbo80Panel.webview.onDidReceiveMessage(message => {
         if (message.command === 'ready') {

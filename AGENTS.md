@@ -110,8 +110,10 @@ vscode-sinclair-basic/
    - Exact whitespace parity with `bas2tap`: Automatically consumes trailing spaces after keywords/tokens, `:` statement separators, and `REM` to prevent double spaces when listed on the ZX Spectrum ROM (e.g. `LET py=0` and `CHR$ 18`).
    - Zero external binary requirements (no `bas2tap.exe` needed by default).
 
-4. **Integrated Web Emulator: Turbo80 (`src/extension.js`)**:
-   - Integrated VS Code Webview panel embedding [Turbo80](https://turbo80.com) (by José Enrique García (Incinerator)).
+4. **Integrated Web Emulator: Turbo80 (`src/extension.js` & `media/turbo80/`)**:
+   - Integrated VS Code Webview embedding [Turbo80](https://turbo80.com) (by José Enrique García (Incinerator)).
+   - **100% Offline Capability**: Packaged locally with `media/turbo80/turbo80.js` and `media/turbo80/turbo80-core.js` for standalone operation without requiring an internet connection.
+   - ROMs for Sinclair 16K/48K/128K and Amstrad +2/+3 are embedded under permissions granted by Amstrad to retrocomputing emulators. Timex ROM changes are in public domain; +D and DISCiPLE under Datel permission; esxDOS under Papaya Dezign permission.
    - Passes the generated `.tap` file directly via memory/base64 without uploading to external servers.
    - Authentic audio, CRT shader effects, 48K/128K machine models, and on-screen keyboard.
    - Explicit attribution footer in the Webview: `Emulado con Turbo80 — Emulador de ZX Spectrum por José Enrique García (Incinerator)`.
