@@ -246,6 +246,50 @@ function findDocumentLine(documentText, targetBasicLine) {
 }
 
 /**
+ * Maps a 1-based source line number (e.g. from .jbas) to a Sinclair BASIC line number.
+ * If the exact line has no statement (e.g. comment or label), scans forward to the next mapped statement.
+ *
+ * @param {number} sourceLine 1-based line number in source file
+ * @param {Map<number, number>|Object} sourceToBasic Mapping of source line -> basic line
+ * @returns {number|null}
+ */
+function mapSourceLineToBasic(sourceLine, sourceToBasic) {
+  if (!sourceToBasic) return sourceLine;
+  const getBasic = (l) => {
+    if (sourceToBasic instanceof Map) return sourceToBasic.get(l);
+    return sourceToBasic[l];
+  };
+
+  const exact = getBasic(sourceLine);
+  if (exact !== undefined) return exact;
+
+  // Search forward up to 500 lines for the next executable statement
+  for (let l = sourceLine + 1; l <= sourceLine + 500; l++) {
+    const next = getBasic(l);
+    if (next !== undefined) return next;
+  }
+  return null;
+}
+
+/**
+ * Maps a Sinclair BASIC line number to a 1-based source line number (e.g. in .jbas).
+ *
+ * @param {number} basicLine Sinclair BASIC line number
+ * @param {Map<number, number>|Object} basicToSource Mapping of basic line -> source line
+ * @returns {number}
+ */
+function mapBasicToSourceLine(basicLine, basicToSource) {
+  if (!basicToSource) return basicLine;
+  let res;
+  if (basicToSource instanceof Map) {
+    res = basicToSource.get(basicLine);
+  } else {
+    res = basicToSource[basicLine];
+  }
+  return res !== undefined ? res : basicLine;
+}
+
+/**
  * Finds the character range [startCol, endCol] of a given 1-based statement on a BASIC line.
  * Statements are separated by colons ':' that are outside string literals and REM comments.
  *
@@ -256,8 +300,8 @@ function findDocumentLine(documentText, targetBasicLine) {
 function findStatementRange(lineText, stmtIndex) {
   if (typeof lineText !== 'string') return { startCol: 0, endCol: 0 };
   
-  // Find start of BASIC code past the line number
-  const prefixMatch = lineText.match(/^\s*\d+\s*/);
+  // Find start of BASIC code past the line number, @label:, or leading whitespace
+  const prefixMatch = lineText.match(/^(\s*@[a-zA-Z0-9_]+:\s*|\s*\d+\s*|\s*)/);
   const codeStart = prefixMatch ? prefixMatch[0].length : 0;
   
   let inString = false;
@@ -309,6 +353,11 @@ class SinclairBasicDebugAdapterCore {
     this.currentDocText = '';
     this.currentFilePath = '';
     this.breakpoints = new Map();
+    this.sourceMap = null;
+  }
+
+  setSourceMap(sourceMap) {
+    this.sourceMap = sourceMap || null;
   }
 
   setDocument(filePath, docText) {
@@ -378,18 +427,27 @@ class SinclairBasicDebugAdapterCore {
         const clientBreakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
         const basicLines = [];
 
-        const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
-        for (const bp of clientBreakpoints) {
-          const docLine0 = bp.line - 1;
-          if (docLine0 >= 0 && docLine0 < lines.length) {
-            const m = lines[docLine0].match(/^\s*(\d+)/);
-            if (m) {
-              basicLines.push(parseInt(m[1], 10));
+        if (this.sourceMap && this.sourceMap.sourceToBasic) {
+          for (const bp of clientBreakpoints) {
+            const mapped = mapSourceLineToBasic(bp.line, this.sourceMap.sourceToBasic);
+            if (mapped !== null && mapped !== undefined) {
+              basicLines.push(mapped);
+            }
+          }
+        } else {
+          const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+          for (const bp of clientBreakpoints) {
+            const docLine0 = bp.line - 1;
+            if (docLine0 >= 0 && docLine0 < lines.length) {
+              const m = lines[docLine0].match(/^\s*(\d+)/);
+              if (m) {
+                basicLines.push(parseInt(m[1], 10));
+              } else {
+                basicLines.push(bp.line);
+              }
             } else {
               basicLines.push(bp.line);
             }
-          } else {
-            basicLines.push(bp.line);
           }
         }
 
@@ -432,8 +490,21 @@ class SinclairBasicDebugAdapterCore {
       case 'stackTrace': {
         const frames = [];
         if (this.currentLine != null) {
-          const docLine0 = findDocumentLine(this.currentDocText, this.currentLine);
-          const docLine1 = docLine0 >= 0 ? (docLine0 + 1) : 1;
+          let docLine0 = -1;
+          let docLine1 = 1;
+          let frameName = '';
+
+          if (this.sourceMap && this.sourceMap.basicToSource) {
+            docLine1 = mapBasicToSourceLine(this.currentLine, this.sourceMap.basicToSource);
+            docLine0 = docLine1 - 1;
+            frameName = `Línea ${docLine1} [BASIC ${this.currentLine}:${this.currentStmt || 1}]`;
+          } else {
+            docLine0 = findDocumentLine(this.currentDocText, this.currentLine);
+            docLine1 = docLine0 >= 0 ? (docLine0 + 1) : 1;
+            frameName = `Línea ${this.currentLine} [Sentencia ${this.currentStmt || 1}]`;
+          }
+
+          const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/)[docLine0] : '';
           const lineText = (docLine0 >= 0 && this.currentDocText)
             ? this.currentDocText.split(/\r?\n/)[docLine0]
             : '';
@@ -445,7 +516,7 @@ class SinclairBasicDebugAdapterCore {
 
           frames.push({
             id: 1,
-            name: `Línea ${this.currentLine} [Sentencia ${this.currentStmt || 1}]`,
+            name: frameName,
             source: {
               name: fileName,
               path: this.currentFilePath
@@ -616,6 +687,8 @@ module.exports = {
   findDocumentLine,
   findStatementRange,
   SinclairBasicDebugAdapterCore,
-  decodeSpectrumString
+  decodeSpectrumString,
+  mapSourceLineToBasic,
+  mapBasicToSourceLine
 };
 

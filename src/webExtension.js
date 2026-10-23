@@ -16,7 +16,9 @@ const { uploadTapToHost, buildTurbo80ShareUrl } = require('./core/share');
 const {
   findDocumentLine,
   findStatementRange,
-  SinclairBasicDebugAdapterCore
+  SinclairBasicDebugAdapterCore,
+  mapSourceLineToBasic,
+  mapBasicToSourceLine
 } = require('./core/debugger');
 const { getTurbo80Html } = require('./core/turbo80Html');
 
@@ -95,10 +97,12 @@ async function buildTapFromDocument(doc) {
 
   let basicCode = doc.getText();
   let baseName = '';
+  let sourceMap = null;
 
   if (doc.fileName.endsWith('.jbas')) {
     baseName = getBaseName(doc.uri, '.jbas');
     const all = transpileJBasAllVersions(basicCode);
+    sourceMap = all.compact;
 
     if (!all.success) {
       throw new Error('Compilation failed:\n' + all.errors.join('\n'));
@@ -142,7 +146,8 @@ async function buildTapFromDocument(doc) {
     tapUri: targetTapUri,
     autoStartLine,
     tapBytes,
-    filename: `${baseName}.tap`
+    filename: `${baseName}.tap`,
+    sourceMap
   };
 }
 
@@ -159,6 +164,7 @@ function activate(context) {
   let activeDebugVars = [];
   let isDebuggingActive = false;
   let activeDebugAdapter = null;
+  let activeDebugSourceMap = null;
 
   class SinclairBasicDebugAdapter {
     constructor(session) {
@@ -201,12 +207,18 @@ function activate(context) {
         }
       });
 
+      if (activeDebugSourceMap) {
+        this.core.setSourceMap(activeDebugSourceMap);
+      }
       if (activeDebugDoc) {
         this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
       }
     }
 
     handleMessage(message) {
+      if (activeDebugSourceMap && !this.core.sourceMap) {
+        this.core.setSourceMap(activeDebugSourceMap);
+      }
       if (activeDebugDoc && !this.core.currentDocText) {
         this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
       }
@@ -245,13 +257,22 @@ function activate(context) {
       b.enabled !== false
     );
     const basicLines = [];
+    const isJBas = document.fileName.endsWith('.jbas') || document.languageId === 'jbas';
+
     for (const bp of bps) {
       const lineIndex = bp.location.range.start.line;
       if (lineIndex < document.lineCount) {
-        const lineText = document.lineAt(lineIndex).text;
-        const m = lineText.match(/^\s*(\d+)/);
-        if (m) {
-          basicLines.push(parseInt(m[1], 10));
+        if (isJBas && activeDebugSourceMap && activeDebugSourceMap.sourceToBasic) {
+          const mapped = mapSourceLineToBasic(lineIndex + 1, activeDebugSourceMap.sourceToBasic);
+          if (mapped !== null && mapped !== undefined) {
+            basicLines.push(mapped);
+          }
+        } else {
+          const lineText = document.lineAt(lineIndex).text;
+          const m = lineText.match(/^\s*(\d+)/);
+          if (m) {
+            basicLines.push(parseInt(m[1], 10));
+          }
         }
       }
     }
@@ -268,7 +289,16 @@ function activate(context) {
   function highlightDebugPosition(doc, basicLine, stmt) {
     clearDebugDecorations();
     if (!doc) return;
-    const docLine = findDocumentLine(doc.getText(), basicLine);
+
+    let docLine = -1;
+    const isJBas = doc.fileName.endsWith('.jbas') || doc.languageId === 'jbas';
+    if (isJBas && activeDebugSourceMap && activeDebugSourceMap.basicToSource) {
+      const sourceLine1 = mapBasicToSourceLine(basicLine, activeDebugSourceMap.basicToSource);
+      docLine = sourceLine1 - 1;
+    } else {
+      docLine = findDocumentLine(doc.getText(), basicLine);
+    }
+
     if (docLine < 0 || docLine >= doc.lineCount) return;
 
     const lineText = doc.lineAt(docLine).text;
@@ -299,8 +329,15 @@ function activate(context) {
     vscode.commands.executeCommand('setContext', 'sinclairBasic.isDebugging', true);
     vscode.commands.executeCommand('setContext', 'sinclairBasic.isPaused', true);
 
-    debugStatusBarItem.text = `$(debug-pause) BASIC: Línea ${line} (Sent. ${stmt})`;
-    debugStatusBarItem.tooltip = `Sinclair BASIC pausado en línea ${line}, sentencia ${stmt}.\nHaz clic para inspeccionar variables en RAM.`;
+    const isJBas = activeDebugDoc && (activeDebugDoc.fileName.endsWith('.jbas') || activeDebugDoc.languageId === 'jbas');
+    if (isJBas && activeDebugSourceMap && activeDebugSourceMap.basicToSource) {
+      const sourceLine1 = mapBasicToSourceLine(line, activeDebugSourceMap.basicToSource);
+      debugStatusBarItem.text = `$(debug-pause) JBAS: L${sourceLine1} (BASIC: ${line}, Sent. ${stmt})`;
+      debugStatusBarItem.tooltip = `Sinclair BASIC pausado en .jbas línea ${sourceLine1} (línea compilada ${line}, sentencia ${stmt}).\nHaz clic para inspeccionar variables en RAM.`;
+    } else {
+      debugStatusBarItem.text = `$(debug-pause) BASIC: Línea ${line} (Sent. ${stmt})`;
+      debugStatusBarItem.tooltip = `Sinclair BASIC pausado en línea ${line}, sentencia ${stmt}.\nHaz clic para inspeccionar variables en RAM.`;
+    }
     debugStatusBarItem.command = 'sinclairBasic.showDebugVariables';
     debugStatusBarItem.show();
 
@@ -309,6 +346,9 @@ function activate(context) {
     }
 
     if (activeDebugAdapter) {
+      if (activeDebugSourceMap) {
+        activeDebugAdapter.core.setSourceMap(activeDebugSourceMap);
+      }
       if (activeDebugDoc) {
         activeDebugAdapter.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
       }
@@ -332,6 +372,7 @@ function activate(context) {
   function handleDebugStopped() {
     isDebuggingActive = false;
     activeDebugDoc = null;
+    activeDebugSourceMap = null;
     activeDebugLine = null;
     activeDebugStmt = null;
     activeDebugVars = [];
@@ -636,7 +677,8 @@ function activate(context) {
     }
 
     try {
-      const { tapBytes, autoStartLine, filename } = await buildTapFromDocument(doc);
+      const { tapBytes, autoStartLine, filename, sourceMap } = await buildTapFromDocument(doc);
+      activeDebugSourceMap = sourceMap;
       vscode.window.showInformationMessage(`Compiled ${filename} (Autostart line ${autoStartLine})`);
       return { tapBytes, filename };
     } catch (err) {
@@ -656,6 +698,8 @@ function activate(context) {
     if (doc.fileName.endsWith('.jbas')) {
       return await handleCompileJBas(uri);
     }
+
+    activeDebugSourceMap = null;
 
     try {
       const { tapBytes, autoStartLine, filename } = await buildTapFromDocument(doc);

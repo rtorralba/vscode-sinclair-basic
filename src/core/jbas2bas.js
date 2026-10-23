@@ -520,10 +520,20 @@ function compileJBas(sourceText, options = {}) {
 
   // Assign line numbers and map labels
   let currentNum = start;
+  const basicToSource = new Map();
+  const sourceToBasic = new Map();
+
   for (const stmt of statements) {
     stmt.lineNum = currentNum;
+    basicToSource.set(currentNum, stmt.origLineNum);
+    sourceToBasic.set(stmt.origLineNum, currentNum);
+
     for (const lbl of stmt.labels) {
       labelMap.set(lbl, currentNum);
+      const labelOrigLine = seenLabels.get(lbl);
+      if (labelOrigLine) {
+        sourceToBasic.set(labelOrigLine, currentNum);
+      }
     }
     currentNum += step;
   }
@@ -532,6 +542,10 @@ function compileJBas(sourceText, options = {}) {
   if (pendingLabels.length > 0) {
     for (const lbl of pendingLabels) {
       labelMap.set(lbl, currentNum);
+      const labelOrigLine = seenLabels.get(lbl);
+      if (labelOrigLine) {
+        sourceToBasic.set(labelOrigLine, currentNum);
+      }
       warnings.push(`Label '@${lbl}' defined at the very end of file (maps to line ${currentNum})`);
     }
   }
@@ -555,6 +569,12 @@ function compileJBas(sourceText, options = {}) {
     success: errors.length === 0,
     text: resultText,
     labels: labelMap,
+    basicToSource,
+    sourceToBasic,
+    lineMap: {
+      basicToSource: Object.fromEntries(basicToSource),
+      sourceToBasic: Object.fromEntries(sourceToBasic)
+    },
     errors,
     warnings,
     linesCount: statements.length

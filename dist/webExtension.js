@@ -821,16 +821,28 @@ var require_jbas2bas = __commonJS({
         };
       }
       let currentNum = start;
+      const basicToSource = /* @__PURE__ */ new Map();
+      const sourceToBasic = /* @__PURE__ */ new Map();
       for (const stmt of statements) {
         stmt.lineNum = currentNum;
+        basicToSource.set(currentNum, stmt.origLineNum);
+        sourceToBasic.set(stmt.origLineNum, currentNum);
         for (const lbl of stmt.labels) {
           labelMap.set(lbl, currentNum);
+          const labelOrigLine = seenLabels.get(lbl);
+          if (labelOrigLine) {
+            sourceToBasic.set(labelOrigLine, currentNum);
+          }
         }
         currentNum += step;
       }
       if (pendingLabels.length > 0) {
         for (const lbl of pendingLabels) {
           labelMap.set(lbl, currentNum);
+          const labelOrigLine = seenLabels.get(lbl);
+          if (labelOrigLine) {
+            sourceToBasic.set(labelOrigLine, currentNum);
+          }
           warnings.push(`Label '@${lbl}' defined at the very end of file (maps to line ${currentNum})`);
         }
       }
@@ -850,6 +862,12 @@ var require_jbas2bas = __commonJS({
         success: errors.length === 0,
         text: resultText,
         labels: labelMap,
+        basicToSource,
+        sourceToBasic,
+        lineMap: {
+          basicToSource: Object.fromEntries(basicToSource),
+          sourceToBasic: Object.fromEntries(sourceToBasic)
+        },
         errors,
         warnings,
         linesCount: statements.length
@@ -2849,9 +2867,33 @@ var require_debugger = __commonJS({
       }
       return -1;
     }
+    function mapSourceLineToBasic2(sourceLine, sourceToBasic) {
+      if (!sourceToBasic) return sourceLine;
+      const getBasic = (l) => {
+        if (sourceToBasic instanceof Map) return sourceToBasic.get(l);
+        return sourceToBasic[l];
+      };
+      const exact = getBasic(sourceLine);
+      if (exact !== void 0) return exact;
+      for (let l = sourceLine + 1; l <= sourceLine + 500; l++) {
+        const next = getBasic(l);
+        if (next !== void 0) return next;
+      }
+      return null;
+    }
+    function mapBasicToSourceLine2(basicLine, basicToSource) {
+      if (!basicToSource) return basicLine;
+      let res;
+      if (basicToSource instanceof Map) {
+        res = basicToSource.get(basicLine);
+      } else {
+        res = basicToSource[basicLine];
+      }
+      return res !== void 0 ? res : basicLine;
+    }
     function findStatementRange2(lineText, stmtIndex) {
       if (typeof lineText !== "string") return { startCol: 0, endCol: 0 };
-      const prefixMatch = lineText.match(/^\s*\d+\s*/);
+      const prefixMatch = lineText.match(/^(\s*@[a-zA-Z0-9_]+:\s*|\s*\d+\s*|\s*)/);
       const codeStart = prefixMatch ? prefixMatch[0].length : 0;
       let inString = false;
       let inRem = false;
@@ -2893,6 +2935,10 @@ var require_debugger = __commonJS({
         this.currentDocText = "";
         this.currentFilePath = "";
         this.breakpoints = /* @__PURE__ */ new Map();
+        this.sourceMap = null;
+      }
+      setSourceMap(sourceMap) {
+        this.sourceMap = sourceMap || null;
       }
       setDocument(filePath, docText) {
         this.currentFilePath = filePath || "";
@@ -2953,18 +2999,27 @@ var require_debugger = __commonJS({
             const sourcePath = args.source && (args.source.path || args.source.name) || "";
             const clientBreakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
             const basicLines = [];
-            const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
-            for (const bp of clientBreakpoints) {
-              const docLine0 = bp.line - 1;
-              if (docLine0 >= 0 && docLine0 < lines.length) {
-                const m = lines[docLine0].match(/^\s*(\d+)/);
-                if (m) {
-                  basicLines.push(parseInt(m[1], 10));
+            if (this.sourceMap && this.sourceMap.sourceToBasic) {
+              for (const bp of clientBreakpoints) {
+                const mapped = mapSourceLineToBasic2(bp.line, this.sourceMap.sourceToBasic);
+                if (mapped !== null && mapped !== void 0) {
+                  basicLines.push(mapped);
+                }
+              }
+            } else {
+              const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/) : [];
+              for (const bp of clientBreakpoints) {
+                const docLine0 = bp.line - 1;
+                if (docLine0 >= 0 && docLine0 < lines.length) {
+                  const m = lines[docLine0].match(/^\s*(\d+)/);
+                  if (m) {
+                    basicLines.push(parseInt(m[1], 10));
+                  } else {
+                    basicLines.push(bp.line);
+                  }
                 } else {
                   basicLines.push(bp.line);
                 }
-              } else {
-                basicLines.push(bp.line);
               }
             }
             this.breakpoints.set(sourcePath, new Set(basicLines));
@@ -3001,14 +3056,25 @@ var require_debugger = __commonJS({
           case "stackTrace": {
             const frames = [];
             if (this.currentLine != null) {
-              const docLine0 = findDocumentLine2(this.currentDocText, this.currentLine);
-              const docLine1 = docLine0 >= 0 ? docLine0 + 1 : 1;
+              let docLine0 = -1;
+              let docLine1 = 1;
+              let frameName = "";
+              if (this.sourceMap && this.sourceMap.basicToSource) {
+                docLine1 = mapBasicToSourceLine2(this.currentLine, this.sourceMap.basicToSource);
+                docLine0 = docLine1 - 1;
+                frameName = `L\xEDnea ${docLine1} [BASIC ${this.currentLine}:${this.currentStmt || 1}]`;
+              } else {
+                docLine0 = findDocumentLine2(this.currentDocText, this.currentLine);
+                docLine1 = docLine0 >= 0 ? docLine0 + 1 : 1;
+                frameName = `L\xEDnea ${this.currentLine} [Sentencia ${this.currentStmt || 1}]`;
+              }
+              const lines = this.currentDocText ? this.currentDocText.split(/\r?\n/)[docLine0] : "";
               const lineText = docLine0 >= 0 && this.currentDocText ? this.currentDocText.split(/\r?\n/)[docLine0] : "";
               const stmtRange = findStatementRange2(lineText, this.currentStmt || 1);
               const fileName = this.currentFilePath ? this.currentFilePath.replace(/\\/g, "/").split("/").pop() : "program.bas";
               frames.push({
                 id: 1,
-                name: `L\xEDnea ${this.currentLine} [Sentencia ${this.currentStmt || 1}]`,
+                name: frameName,
                 source: {
                   name: fileName,
                   path: this.currentFilePath
@@ -3161,7 +3227,9 @@ var require_debugger = __commonJS({
       findDocumentLine: findDocumentLine2,
       findStatementRange: findStatementRange2,
       SinclairBasicDebugAdapterCore: SinclairBasicDebugAdapterCore2,
-      decodeSpectrumString
+      decodeSpectrumString,
+      mapSourceLineToBasic: mapSourceLineToBasic2,
+      mapBasicToSourceLine: mapBasicToSourceLine2
     };
   }
 });
@@ -3853,7 +3921,9 @@ var { uploadTapToHost, buildTurbo80ShareUrl } = require_share();
 var {
   findDocumentLine,
   findStatementRange,
-  SinclairBasicDebugAdapterCore
+  SinclairBasicDebugAdapterCore,
+  mapSourceLineToBasic,
+  mapBasicToSourceLine
 } = require_debugger();
 var { getTurbo80Html } = require_turbo80Html();
 function getBaseName(uri, extToRemove = "") {
@@ -3897,9 +3967,11 @@ async function buildTapFromDocument(doc) {
   await vscode.workspace.fs.createDirectory(distUri);
   let basicCode = doc.getText();
   let baseName = "";
+  let sourceMap = null;
   if (doc.fileName.endsWith(".jbas")) {
     baseName = getBaseName(doc.uri, ".jbas");
     const all = transpileJBasAllVersions(basicCode);
+    sourceMap = all.compact;
     if (!all.success) {
       throw new Error("Compilation failed:\n" + all.errors.join("\n"));
     }
@@ -3934,7 +4006,8 @@ async function buildTapFromDocument(doc) {
     tapUri: targetTapUri,
     autoStartLine,
     tapBytes,
-    filename: `${baseName}.tap`
+    filename: `${baseName}.tap`,
+    sourceMap
   };
 }
 function activate(context) {
@@ -3945,6 +4018,7 @@ function activate(context) {
   let activeDebugVars = [];
   let isDebuggingActive = false;
   let activeDebugAdapter = null;
+  let activeDebugSourceMap = null;
   class SinclairBasicDebugAdapter {
     constructor(session) {
       this._sendMessage = new vscode.EventEmitter();
@@ -3984,11 +4058,17 @@ function activate(context) {
           }
         }
       });
+      if (activeDebugSourceMap) {
+        this.core.setSourceMap(activeDebugSourceMap);
+      }
       if (activeDebugDoc) {
         this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
       }
     }
     handleMessage(message) {
+      if (activeDebugSourceMap && !this.core.sourceMap) {
+        this.core.setSourceMap(activeDebugSourceMap);
+      }
       if (activeDebugDoc && !this.core.currentDocText) {
         this.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
       }
@@ -4020,13 +4100,21 @@ function activate(context) {
       (b) => b instanceof vscode.SourceBreakpoint && b.location.uri.toString() === uriStr && b.enabled !== false
     );
     const basicLines = [];
+    const isJBas = document.fileName.endsWith(".jbas") || document.languageId === "jbas";
     for (const bp of bps) {
       const lineIndex = bp.location.range.start.line;
       if (lineIndex < document.lineCount) {
-        const lineText = document.lineAt(lineIndex).text;
-        const m = lineText.match(/^\s*(\d+)/);
-        if (m) {
-          basicLines.push(parseInt(m[1], 10));
+        if (isJBas && activeDebugSourceMap && activeDebugSourceMap.sourceToBasic) {
+          const mapped = mapSourceLineToBasic(lineIndex + 1, activeDebugSourceMap.sourceToBasic);
+          if (mapped !== null && mapped !== void 0) {
+            basicLines.push(mapped);
+          }
+        } else {
+          const lineText = document.lineAt(lineIndex).text;
+          const m = lineText.match(/^\s*(\d+)/);
+          if (m) {
+            basicLines.push(parseInt(m[1], 10));
+          }
         }
       }
     }
@@ -4041,7 +4129,14 @@ function activate(context) {
   function highlightDebugPosition(doc, basicLine, stmt) {
     clearDebugDecorations();
     if (!doc) return;
-    const docLine = findDocumentLine(doc.getText(), basicLine);
+    let docLine = -1;
+    const isJBas = doc.fileName.endsWith(".jbas") || doc.languageId === "jbas";
+    if (isJBas && activeDebugSourceMap && activeDebugSourceMap.basicToSource) {
+      const sourceLine1 = mapBasicToSourceLine(basicLine, activeDebugSourceMap.basicToSource);
+      docLine = sourceLine1 - 1;
+    } else {
+      docLine = findDocumentLine(doc.getText(), basicLine);
+    }
     if (docLine < 0 || docLine >= doc.lineCount) return;
     const lineText = doc.lineAt(docLine).text;
     const lineRange = new vscode.Range(docLine, 0, docLine, lineText.length);
@@ -4067,15 +4162,26 @@ function activate(context) {
     activeDebugVars = Array.isArray(vars) ? vars : [];
     vscode.commands.executeCommand("setContext", "sinclairBasic.isDebugging", true);
     vscode.commands.executeCommand("setContext", "sinclairBasic.isPaused", true);
-    debugStatusBarItem.text = `$(debug-pause) BASIC: L\xEDnea ${line} (Sent. ${stmt})`;
-    debugStatusBarItem.tooltip = `Sinclair BASIC pausado en l\xEDnea ${line}, sentencia ${stmt}.
+    const isJBas = activeDebugDoc && (activeDebugDoc.fileName.endsWith(".jbas") || activeDebugDoc.languageId === "jbas");
+    if (isJBas && activeDebugSourceMap && activeDebugSourceMap.basicToSource) {
+      const sourceLine1 = mapBasicToSourceLine(line, activeDebugSourceMap.basicToSource);
+      debugStatusBarItem.text = `$(debug-pause) JBAS: L${sourceLine1} (BASIC: ${line}, Sent. ${stmt})`;
+      debugStatusBarItem.tooltip = `Sinclair BASIC pausado en .jbas l\xEDnea ${sourceLine1} (l\xEDnea compilada ${line}, sentencia ${stmt}).
 Haz clic para inspeccionar variables en RAM.`;
+    } else {
+      debugStatusBarItem.text = `$(debug-pause) BASIC: L\xEDnea ${line} (Sent. ${stmt})`;
+      debugStatusBarItem.tooltip = `Sinclair BASIC pausado en l\xEDnea ${line}, sentencia ${stmt}.
+Haz clic para inspeccionar variables en RAM.`;
+    }
     debugStatusBarItem.command = "sinclairBasic.showDebugVariables";
     debugStatusBarItem.show();
     if (activeDebugDoc) {
       highlightDebugPosition(activeDebugDoc, line, stmt);
     }
     if (activeDebugAdapter) {
+      if (activeDebugSourceMap) {
+        activeDebugAdapter.core.setSourceMap(activeDebugSourceMap);
+      }
       if (activeDebugDoc) {
         activeDebugAdapter.core.setDocument(activeDebugDoc.fileName, activeDebugDoc.getText());
       }
@@ -4097,6 +4203,7 @@ Haz clic para inspeccionar variables en RAM.`;
   function handleDebugStopped() {
     isDebuggingActive = false;
     activeDebugDoc = null;
+    activeDebugSourceMap = null;
     activeDebugLine = null;
     activeDebugStmt = null;
     activeDebugVars = [];
@@ -4356,7 +4463,8 @@ ${all.errors.join("\n")}`);
       return null;
     }
     try {
-      const { tapBytes, autoStartLine, filename } = await buildTapFromDocument(doc);
+      const { tapBytes, autoStartLine, filename, sourceMap } = await buildTapFromDocument(doc);
+      activeDebugSourceMap = sourceMap;
       vscode.window.showInformationMessage(`Compiled ${filename} (Autostart line ${autoStartLine})`);
       return { tapBytes, filename };
     } catch (err) {
@@ -4373,6 +4481,7 @@ ${all.errors.join("\n")}`);
     if (doc.fileName.endsWith(".jbas")) {
       return await handleCompileJBas(uri);
     }
+    activeDebugSourceMap = null;
     try {
       const { tapBytes, autoStartLine, filename } = await buildTapFromDocument(doc);
       vscode.window.showInformationMessage(`Successfully built TAP: ${filename} (Autostart line ${autoStartLine})`);

@@ -7,7 +7,9 @@ const {
   findDocumentLine,
   findStatementRange,
   SinclairBasicDebugAdapterCore,
-  decodeSpectrumString
+  decodeSpectrumString,
+  mapSourceLineToBasic,
+  mapBasicToSourceLine
 } = require('../src/core/debugger.js');
 
 describe('Sinclair BASIC Debugger Engine', () => {
@@ -335,7 +337,129 @@ describe('Sinclair BASIC Debugger Engine', () => {
 
       assert.deepStrictEqual(actions, ['continue', 'stepLine', 'stepStmt', 'pause', 'stop']);
     });
+
+    it('maps breakpoints and stackTrace between .jbas line numbers and .bas line numbers', () => {
+      const responses = [];
+      const actions = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: () => {},
+        sendResponse: (r) => responses.push(r),
+        onAction: (a, d) => actions.push({ action: a, data: d })
+      });
+
+      const jbasDoc = `' My Game Title
+LET py = 0
+' Game loop
+@loop:
+LET py = py + 1
+IF py > 10 THEN STOP
+GO TO @loop
+`;
+
+      adapter.setDocument('c:/games/game.jbas', jbasDoc);
+
+      // Equivalence table:
+      // JBAS line 2 (LET py = 0) <-> BASIC line 1
+      // JBAS line 4 (@loop:) precedes line 5 <-> BASIC line 2
+      // JBAS line 5 (LET py = py + 1) <-> BASIC line 2
+      // JBAS line 6 (IF py > 10 THEN STOP) <-> BASIC line 3
+      // JBAS line 7 (GO TO @loop) <-> BASIC line 4
+      const sourceToBasic = new Map([
+        [2, 1],
+        [4, 2],
+        [5, 2],
+        [6, 3],
+        [7, 4]
+      ]);
+      const basicToSource = new Map([
+        [1, 2],
+        [2, 5],
+        [3, 6],
+        [4, 7]
+      ]);
+
+      adapter.setSourceMap({ sourceToBasic, basicToSource });
+
+      // 1. setBreakpoints from VS Code at .jbas line 5 and line 3 (comment line -> scans to line 4/5)
+      adapter.handleMessage({
+        seq: 1,
+        type: 'request',
+        command: 'setBreakpoints',
+        arguments: {
+          source: { path: 'c:/games/game.jbas' },
+          breakpoints: [
+            { line: 5 }, // exact statement line
+            { line: 3 }  // comment line, should map to next statement at line 5 (BASIC line 2)
+          ]
+        }
+      });
+
+      assert.strictEqual(actions[0].action, 'setBreakpoints');
+      assert.deepStrictEqual(actions[0].data.lines, [2, 2]);
+
+      // 2. stackTrace when paused at BASIC line 2 (which is JBAS line 5)
+      adapter.notifyPaused(2, 1, []);
+      adapter.handleMessage({
+        seq: 2,
+        type: 'request',
+        command: 'stackTrace',
+        arguments: { threadId: 1 }
+      });
+
+      const stackBody = responses.find(r => r.command === 'stackTrace').body;
+      assert.strictEqual(stackBody.stackFrames.length, 1);
+      const frame = stackBody.stackFrames[0];
+      assert.strictEqual(frame.line, 5); // Must point to JBAS line 5!
+      assert.strictEqual(frame.source.name, 'game.jbas');
+      assert.ok(frame.name.includes('Línea 5 [BASIC 2:1]'));
+    });
+  });
+
+  describe('mapSourceLineToBasic and mapBasicToSourceLine', () => {
+    it('maps line numbers directly and scans forward across comments', () => {
+      const sourceToBasic = new Map([
+        [10, 100],
+        [15, 110],
+        [20, 120]
+      ]);
+      const basicToSource = new Map([
+        [100, 10],
+        [110, 15],
+        [120, 20]
+      ]);
+
+      assert.strictEqual(mapSourceLineToBasic(10, sourceToBasic), 100);
+      assert.strictEqual(mapSourceLineToBasic(11, sourceToBasic), 110); // scans forward to next statement
+      assert.strictEqual(mapSourceLineToBasic(14, sourceToBasic), 110);
+      assert.strictEqual(mapSourceLineToBasic(15, sourceToBasic), 110);
+
+      assert.strictEqual(mapBasicToSourceLine(100, basicToSource), 10);
+      assert.strictEqual(mapBasicToSourceLine(110, basicToSource), 15);
+      assert.strictEqual(mapBasicToSourceLine(120, basicToSource), 20);
+      assert.strictEqual(mapBasicToSourceLine(999, basicToSource), 999);
+    });
+  });
+
+  describe('findStatementRange with .jbas labels and unnumbered lines', () => {
+    it('calculates statement ranges correctly on lines with @label: prefix', () => {
+      const line = '@loop: LET a=1: LET b=2';
+      const stmt1 = findStatementRange(line, 1);
+      assert.strictEqual(line.slice(stmt1.startCol, stmt1.endCol), 'LET a=1');
+
+      const stmt2 = findStatementRange(line, 2);
+      assert.strictEqual(line.slice(stmt2.startCol, stmt2.endCol), 'LET b=2');
+    });
+
+    it('calculates statement ranges correctly on unnumbered indented lines', () => {
+      const line = '  LET py=0: LET oldpy=0';
+      const stmt1 = findStatementRange(line, 1);
+      assert.strictEqual(line.slice(stmt1.startCol, stmt1.endCol), 'LET py=0');
+
+      const stmt2 = findStatementRange(line, 2);
+      assert.strictEqual(line.slice(stmt2.startCol, stmt2.endCol), 'LET oldpy=0');
+    });
   });
 
 });
+
 

@@ -284,4 +284,31 @@ test('transpileJBasAllVersions respects optimizePrintAttributes option', () => {
   assert.ok(resDisabled.compact.text.includes('PAPER 2'));
 });
 
+test('compileJBas returns basicToSource and sourceToBasic line equivalence tables', () => {
+  const source = `' Header comment
+LET a = 1
+' Empty or comment line
+@loop:
+LET a = a + 1
+GO TO @loop
+`;
+
+  const res = compileJBas(source, { start: 1, step: 1 });
+  assert.equal(res.success, true);
+
+  // Line 2 (LET a = 1) -> BASIC line 1
+  assert.equal(res.basicToSource.get(1), 2);
+  assert.equal(res.sourceToBasic.get(2), 1);
+
+  // Label @loop at line 4 precedes statement at line 5 -> BASIC line 2
+  assert.equal(res.basicToSource.get(2), 5);
+  assert.equal(res.sourceToBasic.get(4), 2);
+  assert.equal(res.sourceToBasic.get(5), 2);
+
+  // Line 6 (GO TO @loop) -> BASIC line 3
+  assert.equal(res.basicToSource.get(3), 6);
+  assert.equal(res.sourceToBasic.get(6), 3);
+});
+
+
 
