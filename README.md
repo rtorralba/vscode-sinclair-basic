@@ -1,7 +1,7 @@
 # Sinclair BASIC for Visual Studio Code
 
 <p align="center">
-  <img src="icon.png" width="128" height="128" alt="Sinclair BASIC for Visual Studio Code">
+  <img src="screenshot_1.png" width="100%" alt="Sinclair BASIC for Visual Studio Code">
 </p>
 
 > **Disclaimer**: This is an independent, unofficial community extension providing development tools for the **Sinclair BASIC** programming language on ZX Spectrum and compatible retro computers. It is not affiliated with, sponsored by, or endorsed by Sinclair Research, Amstrad, Sky, or any of their successors.
