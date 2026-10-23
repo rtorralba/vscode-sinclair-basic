@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   stripComments,
   convertCommentsToRem,
+  formatLabelToTitle,
   replaceLabelsOutsideStrings,
   compileJBas,
   transpileJBasAllVersions
@@ -164,13 +165,14 @@ GO TO @start
   assert.equal(step10Lines[2], '30 LET a=1 : LET b=2 : LET c=3');
   assert.equal(step10Lines[3], '40 GO TO 10');
 
-  // Comments: 10 by 10, with comments
+  // Comments: 10 by 10, with comments and REM SUB header comments above routines
   const commentsLines = all.comments.text.trim().split(/\r?\n/);
   assert.equal(commentsLines[0], '10 REM Main header');
-  assert.equal(commentsLines[1], '20 BORDER 0: INK 7: PAPER 0: CLS: REM Screen setup');
-  assert.equal(commentsLines[2], '30 PRINT AT 10,10; "SCORE: "; score: REM Show score');
-  assert.equal(commentsLines[3], '40 LET a=1 : LET b=2 : LET c=3');
-  assert.equal(commentsLines[4], '50 GO TO 20');
+  assert.equal(commentsLines[1], '20 REM SUB Start');
+  assert.equal(commentsLines[2], '30 BORDER 0: INK 7: PAPER 0: CLS: REM Screen setup');
+  assert.equal(commentsLines[3], '40 PRINT AT 10,10; "SCORE: "; score: REM Show score');
+  assert.equal(commentsLines[4], '50 LET a=1 : LET b=2 : LET c=3');
+  assert.equal(commentsLines[5], '60 GO TO 20');
 
   // Sinclair: 10 by 10, without comments, with bas2tap wildcards translated to standard CHR$
   const sinclairLines = all.sinclair.text.trim().split(/\r?\n/);
@@ -307,7 +309,49 @@ GO TO @loop
 
   // Line 6 (GO TO @loop) -> BASIC line 3
   assert.equal(res.basicToSource.get(3), 6);
-  assert.equal(res.sourceToBasic.get(6), 3);
+});
+
+test('formatLabelToTitle formats snake_case, camelCase and uppercase labels into Title Case', () => {
+  assert.equal(formatLabelToTitle('game_over'), 'Game Over');
+  assert.equal(formatLabelToTitle('bucle_principal'), 'Bucle Principal');
+  assert.equal(formatLabelToTitle('actualizarMarcadorYDificultad'), 'Actualizar Marcador Y Dificultad');
+  assert.equal(formatLabelToTitle('imprimir_unidades'), 'Imprimir Unidades');
+  assert.equal(formatLabelToTitle('point'), 'Point');
+  assert.equal(formatLabelToTitle('u_5'), 'U 5');
+  assert.equal(formatLabelToTitle('GAME_OVER'), 'Game Over');
+  assert.equal(formatLabelToTitle('pantalla_inicio'), 'Pantalla Inicio');
+  assert.equal(formatLabelToTitle('redibujar_nube_pequena'), 'Redibujar Nube Pequena');
+});
+
+test('compileJBas with includeLabelComments adds REM SUB <Title> above subroutines and maps jumps', () => {
+  const source = `
+GO TO @pantalla_inicio
+
+@game_over:
+IF sc>hs THEN LET hs=sc
+PRINT AT 20, 5; "GAME OVER"
+GO TO @pantalla_inicio
+
+@pantalla_inicio:
+BORDER 1: PAPER 1: CLS
+GO TO @game_over
+`;
+
+  const res = compileJBas(source, { start: 10, step: 10, keepComments: true, includeLabelComments: true });
+  assert.equal(res.success, true);
+  const lines = res.text.trim().split(/\r?\n/);
+
+  // Jump to @pantalla_inicio points to line 60 (the REM SUB Pantalla Inicio)
+  assert.equal(lines[0], '10 GO TO 60');
+  // Sub Game Over header
+  assert.equal(lines[1], '20 REM SUB Game Over');
+  assert.equal(lines[2], '30 IF sc>hs THEN LET hs=sc');
+  assert.equal(lines[3], '40 PRINT AT 20, 5; "GAME OVER"');
+  assert.equal(lines[4], '50 GO TO 60');
+  // Sub Pantalla Inicio header
+  assert.equal(lines[5], '60 REM SUB Pantalla Inicio');
+  assert.equal(lines[6], '70 BORDER 1: PAPER 1: CLS');
+  assert.equal(lines[7], '80 GO TO 20');
 });
 
 

@@ -761,10 +761,21 @@ var require_jbas2bas = __commonJS({
       });
       return optimizedStmts.join(":") + remPart;
     }
+    function formatLabelToTitle(label) {
+      if (!label) return "";
+      const words = label.replace(/[-_]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2").replace(/([a-zA-Z])([0-9]+)/g, "$1 $2").replace(/([0-9]+)([a-zA-Z])/g, "$1 $2").trim().split(/\s+/);
+      return words.filter(Boolean).map((w) => {
+        if (w.length > 1 && w === w.toUpperCase()) {
+          return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+        }
+        return w.charAt(0).toUpperCase() + w.slice(1);
+      }).join(" ");
+    }
     function compileJBas2(sourceText, options = {}) {
       const start = typeof options.start === "number" ? options.start : 10;
       const step = typeof options.step === "number" ? options.step : 10;
       const keepComments = !!options.keepComments;
+      const includeLabelComments = !!options.includeLabelComments;
       const compactWhitespace = !!options.compactWhitespace;
       const optimizeAttributes = options.optimizePrintAttributes !== void 0 ? !!options.optimizePrintAttributes : options.optimizeAttributes !== void 0 ? !!options.optimizeAttributes : compactWhitespace;
       const rawLines = sourceText.split(/\r?\n/);
@@ -802,6 +813,16 @@ var require_jbas2bas = __commonJS({
           }
         }
         if (line) {
+          if (includeLabelComments && pendingLabels.length > 0) {
+            for (const lbl of pendingLabels) {
+              statements.push({
+                origLineNum: seenLabels.get(lbl) || origLineNum,
+                code: `REM SUB ${formatLabelToTitle(lbl)}`,
+                labels: [lbl]
+              });
+            }
+            pendingLabels = [];
+          }
           statements.push({
             origLineNum,
             code: line,
@@ -809,6 +830,16 @@ var require_jbas2bas = __commonJS({
           });
           pendingLabels = [];
         }
+      }
+      if (includeLabelComments && pendingLabels.length > 0) {
+        for (const lbl of pendingLabels) {
+          statements.push({
+            origLineNum: seenLabels.get(lbl) || rawLines.length,
+            code: `REM SUB ${formatLabelToTitle(lbl)}`,
+            labels: [lbl]
+          });
+        }
+        pendingLabels = [];
       }
       if (statements.length === 0) {
         return {
@@ -960,6 +991,7 @@ Options:
         start: 10,
         step: 10,
         keepComments: true,
+        includeLabelComments: true,
         compactWhitespace: false,
         optimizePrintAttributes: false
       });
@@ -981,6 +1013,7 @@ Options:
     module2.exports = {
       stripComments,
       convertCommentsToRem,
+      formatLabelToTitle,
       replaceLabelsOutsideStrings,
       compactWhitespaceOutsideStrings,
       foldStringTerms,

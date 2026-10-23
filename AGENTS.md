@@ -105,6 +105,7 @@ vscode-sinclair-basic/
    - Smart whitespace compaction (`compactWhitespaceOutsideStrings`): For the compact optimal build (`dist/<filename>.bas`), strips redundant spaces around operators (`=`, `+`, `-`, `*`, `/`, `^`, `<`, `>`, `<=`, `>=`, `<>`, `(`, `)`, `,`, `;`, `:`), preserving spaces inside string literals and `REM` comments while keeping `step10` readable.
    - **Attribute & String Constant Optimization (`optimizeAttributesAndStrings`)**: Configurable vía `sinclairBasic.optimizePrintAttributes` (activado por defecto). Permite al programador escribir código Sinclair BASIC 100% estándar y natural (ej. `PRINT AT 10, 1; PAPER 2; "HOLA"`). El transpilador absorbe automáticamente las coordenadas y modificadores de color constantes en la cadena (`PRINT "{AT 10,1}{PAPER 2}HOLA"`), reduciendo llamadas al intérprete en la ROM del Spectrum. También pliega automáticamente cadenas concatenadas de `CHR$` constantes (`CHR$ 17 + CHR$ 4 + " "` -> `"{PAPER 4} "`).
    - **ZX Spectrum ROM `0x0D` (Enter) Safeguard**: Row 13 or Column 13 in `AT row, col` are strictly NEVER absorbed into string literals (e.g. `PRINT AT 13, 7; "{PAPER 7} "`). In the ZX Spectrum ROM, byte `13` (`0x0D`) is the line terminator (`Enter`). If byte 13 appears inside string literals within program lines, the ROM parser thinks the line ended before the closing quote and halts with error `C Nonsense in BASIC`.
+   - **Subroutine Headers in Documented Version (`REM SUB <Title>`)**: En la versión documentada (`dist/<filename>-comments.bas`), cada etiqueta `@label:` genera encima de su rutina una cabecera numerada `REM SUB <Nombre>` convertida automáticamente a Title Case (ej. `@game_over:` -> `REM SUB Game Over`, `@actualizarMarcadorYDificultad:` -> `REM SUB Actualizar Marcador Y Dificultad`). Las llamadas (`GO SUB`, `GO TO`, etc.) mapean limpiamente a la cabecera, integrándose con `folding.js` y Go to Definition sin impactar en absoluto a la versión de producción compacta `dist/<filename>.bas`.
 
 3. **Pure JavaScript TAP Generator (`src/core/tapGenerator.js`)**:
    - Native Sinclair BASIC tokenizer and ZX Spectrum `.tap` generator written in pure JS.
@@ -127,7 +128,7 @@ vscode-sinclair-basic/
    - `sinclairBasic.transpileJBas`: Transpila `.jbas` generando 4 versiones en `dist/`:
      1. `dist/<filename>.bas`: Líneas 1 a 1, sin comentarios y con espacios de operadores compactados (máxima optimización para cinta y RAM del Spectrum).
      2. `dist/<filename>-step10.bas`: Líneas de 10 en 10, sin comentarios (versión estándar para desarrollo y lectura).
-     3. `dist/<filename>-comments.bas`: Líneas de 10 en 10, con comentarios convertidos a `REM` (versión documentada).
+     3. `dist/<filename>-comments.bas`: Líneas de 10 en 10, con comentarios convertidos a `REM` y cabeceras de subrutina automáticas `REM SUB <Nombre>` para cada etiqueta `@label:` (versión documentada).
      4. `dist/<filename>.sinclair.bas`: Líneas de 10 en 10, con todos los wildcards de `bas2tap` (`{PAPER n}`, `{AT y, x}`, etc.) traducidos a llamadas estándar `CHR$` de Sinclair BASIC.
      Abre `dist/<filename>-step10.bas` en el editor sin generar TAP (`Ctrl+Shift+T`).
    - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compila `.bas` a `dist/<filename>.tap` nativamente y genera `dist/<filename>.sinclair.bas` (`Ctrl+Shift+B`).

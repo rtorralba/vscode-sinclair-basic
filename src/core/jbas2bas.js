@@ -424,6 +424,35 @@ function optimizeAttributesAndStrings(code) {
 }
 
 /**
+ * Formats a label name (e.g. 'game_over', 'bucle_principal', 'actualizarMarcadorYDificultad')
+ * into a human-readable Title Case string for subroutine REM comments
+ * (e.g. 'Game Over', 'Bucle Principal', 'Actualizar Marcador Y Dificultad').
+ * @param {string} label 
+ * @returns {string}
+ */
+function formatLabelToTitle(label) {
+  if (!label) return '';
+  const words = label
+    .replace(/[-_]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-zA-Z])([0-9]+)/g, '$1 $2')
+    .replace(/([0-9]+)([a-zA-Z])/g, '$1 $2')
+    .trim()
+    .split(/\s+/);
+
+  return words
+    .filter(Boolean)
+    .map(w => {
+      if (w.length > 1 && w === w.toUpperCase()) {
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      }
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(' ');
+}
+
+/**
  * Compiles a .jbas string into a numbered Sinclair .bas string.
  * 
  * @param {string} sourceText 
@@ -431,6 +460,7 @@ function optimizeAttributesAndStrings(code) {
  * @param {number} [options.start=10]
  * @param {number} [options.step=10]
  * @param {boolean} [options.keepComments=false]
+ * @param {boolean} [options.includeLabelComments=false]
  * @param {boolean} [options.compactWhitespace=false]
  * @param {boolean} [options.optimizeAttributes]
  * @returns {{
@@ -446,6 +476,7 @@ function compileJBas(sourceText, options = {}) {
   const start = typeof options.start === 'number' ? options.start : 10;
   const step = typeof options.step === 'number' ? options.step : 10;
   const keepComments = !!options.keepComments;
+  const includeLabelComments = !!options.includeLabelComments;
   const compactWhitespace = !!options.compactWhitespace;
   const optimizeAttributes = options.optimizePrintAttributes !== undefined
     ? !!options.optimizePrintAttributes
@@ -498,6 +529,16 @@ function compileJBas(sourceText, options = {}) {
 
     // If code remains after label extraction, it's a statement
     if (line) {
+      if (includeLabelComments && pendingLabels.length > 0) {
+        for (const lbl of pendingLabels) {
+          statements.push({
+            origLineNum: seenLabels.get(lbl) || origLineNum,
+            code: `REM SUB ${formatLabelToTitle(lbl)}`,
+            labels: [lbl]
+          });
+        }
+        pendingLabels = [];
+      }
       statements.push({
         origLineNum,
         code: line,
@@ -505,6 +546,18 @@ function compileJBas(sourceText, options = {}) {
       });
       pendingLabels = [];
     }
+  }
+
+  // If there are trailing labels with no statement, emit label comments if enabled
+  if (includeLabelComments && pendingLabels.length > 0) {
+    for (const lbl of pendingLabels) {
+      statements.push({
+        origLineNum: seenLabels.get(lbl) || rawLines.length,
+        code: `REM SUB ${formatLabelToTitle(lbl)}`,
+        labels: [lbl]
+      });
+    }
+    pendingLabels = [];
   }
 
   if (statements.length === 0) {
@@ -710,6 +763,7 @@ function transpileJBasAllVersions(sourceText, options = {}) {
     start: 10,
     step: 10,
     keepComments: true,
+    includeLabelComments: true,
     compactWhitespace: false,
     optimizePrintAttributes: false
   });
@@ -735,6 +789,7 @@ function transpileJBasAllVersions(sourceText, options = {}) {
 module.exports = {
   stripComments,
   convertCommentsToRem,
+  formatLabelToTitle,
   replaceLabelsOutsideStrings,
   compactWhitespaceOutsideStrings,
   foldStringTerms,
