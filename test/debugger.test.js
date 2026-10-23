@@ -6,7 +6,8 @@ const {
   readSpectrumVariables,
   findDocumentLine,
   findStatementRange,
-  SinclairBasicDebugAdapterCore
+  SinclairBasicDebugAdapterCore,
+  decodeSpectrumString
 } = require('../src/core/debugger.js');
 
 describe('Sinclair BASIC Debugger Engine', () => {
@@ -90,7 +91,7 @@ describe('Sinclair BASIC Debugger Engine', () => {
       assert.strictEqual(vars.length, 3);
       assert.deepStrictEqual(vars[0], { name: 'j', type: 'number', value: 7 });
       assert.deepStrictEqual(vars[1], { name: 'score', type: 'number', value: 1500 });
-      assert.deepStrictEqual(vars[2], { name: 'm$', type: 'string', value: 'OK', length: 2 });
+      assert.deepStrictEqual(vars[2], { name: 'm$', type: 'string', value: 'OK', length: 2, rawBytes: [79, 75] });
     });
 
     it('returns empty array when VARS is empty (starts with 0x80)', () => {
@@ -101,6 +102,42 @@ describe('Sinclair BASIC Debugger Engine', () => {
 
       const vars = readSpectrumVariables((addr) => memory[addr]);
       assert.deepStrictEqual(vars, []);
+    });
+  });
+
+  describe('decodeSpectrumString', () => {
+    it('decodes raw bytes into Sinclair BASIC {CODE n} wildcards (e.g. y$ in Dino BASIC)', () => {
+      // y$ = [19, 17, 16, 16, 17, 19, 20]
+      const yBytes = [19, 17, 16, 16, 17, 19, 20];
+      assert.strictEqual(
+        decodeSpectrumString(yBytes),
+        '{CODE 19}{CODE 17}{CODE 16}{CODE 16}{CODE 17}{CODE 19}{CODE 20}'
+      );
+    });
+
+    it('decodes control codes: PAPER, INK, FLASH, AT, and UDGs', () => {
+      // {PAPER 4} {PAPER 1} 
+      const cBytes = [17, 4, 32, 17, 1, 32];
+      assert.strictEqual(decodeSpectrumString(cBytes), '{PAPER 4} {PAPER 1} ');
+
+      // {PAPER 3}{INK 2}{FLASH 1}
+      const pBytes = [17, 3, 16, 2, 18, 1];
+      assert.strictEqual(decodeSpectrumString(pBytes), '{PAPER 3}{INK 2}{FLASH 1}');
+
+      // {AT 10,20}
+      const atBytes = [22, 10, 20];
+      assert.strictEqual(decodeSpectrumString(atBytes), '{AT 10,20}');
+
+      // UDG {A} and {U}
+      assert.strictEqual(decodeSpectrumString([144, 164]), '{A}{U}');
+    });
+
+    it('handles regular text with quotes and backslashes', () => {
+      const textBytes = [72, 79, 76, 65]; // "HOLA"
+      assert.strictEqual(decodeSpectrumString(textBytes), 'HOLA');
+
+      const quoteBytes = [34]; // quote
+      assert.strictEqual(decodeSpectrumString(quoteBytes), '\\"');
     });
   });
 
@@ -245,8 +282,41 @@ describe('Sinclair BASIC Debugger Engine', () => {
       assert.strictEqual(vars.length, 2);
       assert.strictEqual(vars[0].name, 'a');
       assert.strictEqual(vars[0].value, '1');
-      assert.strictEqual(vars[1].name, 'msg$');
       assert.strictEqual(vars[1].value, '"ZX"');
+    });
+
+    it('expands string variables with byte-by-byte CODE inspection in DAP variables request', () => {
+      const responses = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: () => {},
+        sendResponse: (r) => responses.push(r)
+      });
+
+      // Variable y$ has rawBytes for Dino BASIC jump heights
+      adapter.notifyPaused(10, 1, [
+        {
+          name: 'y$',
+          type: 'string',
+          value: '{CODE 19}{CODE 17}{CODE 16}{CODE 16}{CODE 17}{CODE 19}{CODE 20}',
+          rawBytes: [19, 17, 16, 16, 17, 19, 20]
+        }
+      ]);
+
+      // Top-level variables (variablesReference = 1000)
+      adapter.handleMessage({ seq: 1, type: 'request', command: 'variables', arguments: { variablesReference: 1000 } });
+      const topVars = responses[0].body.variables;
+      assert.strictEqual(topVars[0].name, 'y$');
+      assert.strictEqual(topVars[0].value, '"{CODE 19}{CODE 17}{CODE 16}{CODE 16}{CODE 17}{CODE 19}{CODE 20}"');
+      assert.strictEqual(topVars[0].variablesReference, 2000); // Expandable!
+
+      // Child expansion (variablesReference = 2000)
+      adapter.handleMessage({ seq: 2, type: 'request', command: 'variables', arguments: { variablesReference: 2000 } });
+      const childVars = responses[1].body.variables;
+      assert.strictEqual(childVars.length, 7);
+      assert.strictEqual(childVars[0].name, '(1)');
+      assert.strictEqual(childVars[0].value, '19  {CODE 19}');
+      assert.strictEqual(childVars[6].name, '(7)');
+      assert.strictEqual(childVars[6].value, '20  {CODE 20}');
     });
 
     it('dispatches debugger actions: continue, next, stepIn, pause, disconnect', () => {

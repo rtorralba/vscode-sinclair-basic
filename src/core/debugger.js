@@ -40,6 +40,107 @@ function decodeSinclairFloat(b0, b1, b2, b3, b4) {
 }
 
 /**
+ * Decodes raw bytes from ZX Spectrum RAM into a human-readable Sinclair BASIC string literal.
+ * Control codes (INK, PAPER, AT, etc.), UDGs ({A}-{U}), and character codes ({CODE n})
+ * are represented using standard Sinclair BASIC / bas2tap notation instead of C-style hex.
+ *
+ * @param {Uint8Array|Array<number>} bytes
+ * @returns {string}
+ */
+function decodeSpectrumString(bytes) {
+  if (!bytes || bytes.length === 0) return '';
+  let res = '';
+  let i = 0;
+  const len = bytes.length;
+
+  while (i < len) {
+    const b = bytes[i];
+
+    // INK (16): followed by color 0..7 or 8, 9
+    if (b === 16 && i + 1 < len && bytes[i + 1] <= 9) {
+      res += `{INK ${bytes[i + 1]}}`;
+      i += 2;
+      continue;
+    }
+
+    // PAPER (17): followed by color 0..7 or 8, 9
+    if (b === 17 && i + 1 < len && bytes[i + 1] <= 9) {
+      res += `{PAPER ${bytes[i + 1]}}`;
+      i += 2;
+      continue;
+    }
+
+    // FLASH (18): followed by 0, 1 or 8
+    if (b === 18 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+      res += `{FLASH ${bytes[i + 1]}}`;
+      i += 2;
+      continue;
+    }
+
+    // BRIGHT (19): followed by 0, 1 or 8
+    if (b === 19 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+      res += `{BRIGHT ${bytes[i + 1]}}`;
+      i += 2;
+      continue;
+    }
+
+    // INVERSE (20): followed by 0 or 1
+    if (b === 20 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+      res += `{INVERSE ${bytes[i + 1]}}`;
+      i += 2;
+      continue;
+    }
+
+    // OVER (21): followed by 0 or 1
+    if (b === 21 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+      res += `{OVER ${bytes[i + 1]}}`;
+      i += 2;
+      continue;
+    }
+
+    // AT (22): followed by row (0..21) and col (0..31)
+    if (b === 22 && i + 2 < len && bytes[i + 1] <= 21 && bytes[i + 2] <= 31) {
+      res += `{AT ${bytes[i + 1]},${bytes[i + 2]}}`;
+      i += 3;
+      continue;
+    }
+
+    // TAB (23): followed by 2 bytes (col low, col high)
+    if (b === 23 && i + 2 < len) {
+      const tabCol = bytes[i + 1] | (bytes[i + 2] << 8);
+      res += `{TAB ${tabCol}}`;
+      i += 3;
+      continue;
+    }
+
+    // UDG Graphics {A}..{U} (codes 144..164)
+    if (b >= 144 && b <= 164) {
+      const udgLetter = String.fromCharCode(65 + (b - 144));
+      res += `{${udgLetter}}`;
+      i++;
+      continue;
+    }
+
+    // Printable ASCII characters
+    if (b >= 32 && b <= 126) {
+      if (b === 34) {
+        res += '\\"';
+      } else {
+        res += String.fromCharCode(b);
+      }
+      i++;
+      continue;
+    }
+
+    // Fallback for all other control/graphic codes: {CODE n}
+    res += `{CODE ${b}}`;
+    i++;
+  }
+
+  return res;
+}
+
+/**
  * Reads and parses all BASIC variables from ZX Spectrum 48K RAM.
  *
  * @param {Function} readByte Function (addr) => byte (0-255)
@@ -86,16 +187,12 @@ function readSpectrumVariables(readByte) {
       // String variable: e.g. 'a$' to 'z$'
       const name = String.fromCharCode(96 + letterCode) + '$';
       const len = (readByte(p + 1) & 0xFF) | ((readByte(p + 2) & 0xFF) << 8);
-      let str = '';
+      const rawBytes = [];
       for (let i = 0; i < len; i++) {
-        const ch = readByte(p + 3 + i);
-        if (ch >= 32 && ch <= 126) {
-          str += String.fromCharCode(ch);
-        } else {
-          str += `\\x${ch.toString(16).padStart(2, '0').toUpperCase()}`;
-        }
+        rawBytes.push(readByte(p + 3 + i));
       }
-      vars.push({ name, type: 'string', value: str, length: len });
+      const str = decodeSpectrumString(rawBytes);
+      vars.push({ name, type: 'string', value: str, length: len, rawBytes });
       p += 3 + len;
     } else if (type === 7) {
       // FOR-NEXT control variable
@@ -381,26 +478,55 @@ class SinclairBasicDebugAdapterCore {
       }
 
       case 'variables': {
-        const dapVars = (this.currentVars || []).map(v => {
-          let valStr = '';
-          if (v.type === 'string') {
-            valStr = `"${v.value}"`;
-          } else if (v.type === 'for') {
-            valStr = `${v.value} (TO ${v.limit} STEP ${v.step})`;
-          } else {
-            valStr = String(v.value);
-          }
-          return {
-            name: v.name,
-            value: valStr,
-            type: v.type,
-            variablesReference: 0
-          };
-        });
+        const varRef = args.variablesReference;
+        if (varRef === 1000) {
+          const dapVars = (this.currentVars || []).map((v, idx) => {
+            let valStr = '';
+            let childRef = 0;
+            if (v.type === 'string') {
+              valStr = `"${v.value}"`;
+              if (v.rawBytes && v.rawBytes.length > 0) {
+                childRef = 2000 + idx;
+              }
+            } else if (v.type === 'for') {
+              valStr = `${v.value} (TO ${v.limit} STEP ${v.step})`;
+            } else {
+              valStr = String(v.value);
+            }
+            return {
+              name: v.name,
+              value: valStr,
+              type: v.type,
+              variablesReference: childRef
+            };
+          });
 
-        this._sendSuccess(request, {
-          variables: dapVars
-        });
+          this._sendSuccess(request, {
+            variables: dapVars
+          });
+        } else if (varRef >= 2000) {
+          const varIdx = varRef - 2000;
+          const targetVar = this.currentVars && this.currentVars[varIdx];
+          const children = [];
+          if (targetVar && targetVar.rawBytes) {
+            targetVar.rawBytes.forEach((b, i) => {
+              const charDesc = (b >= 32 && b <= 126)
+                ? `"${String.fromCharCode(b)}"`
+                : `{CODE ${b}}`;
+              children.push({
+                name: `(${i + 1})`,
+                value: `${b}  ${charDesc}`,
+                type: 'CODE',
+                variablesReference: 0
+              });
+            });
+          }
+          this._sendSuccess(request, {
+            variables: children
+          });
+        } else {
+          this._sendSuccess(request, { variables: [] });
+        }
         break;
       }
 
@@ -489,6 +615,7 @@ module.exports = {
   readSpectrumVariables,
   findDocumentLine,
   findStatementRange,
-  SinclairBasicDebugAdapterCore
+  SinclairBasicDebugAdapterCore,
+  decodeSpectrumString
 };
 

@@ -300,6 +300,76 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       return Math.round(val * 1000000) / 1000000;
     }
 
+    function decodeSpectrumString(bytes) {
+      if (!bytes || bytes.length === 0) return '';
+      let res = '';
+      let i = 0;
+      const len = bytes.length;
+
+      while (i < len) {
+        const b = bytes[i];
+
+        if (b === 16 && i + 1 < len && bytes[i + 1] <= 9) {
+          res += '{INK ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 17 && i + 1 < len && bytes[i + 1] <= 9) {
+          res += '{PAPER ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 18 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+          res += '{FLASH ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 19 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+          res += '{BRIGHT ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 20 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+          res += '{INVERSE ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 21 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+          res += '{OVER ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 22 && i + 2 < len && bytes[i + 1] <= 21 && bytes[i + 2] <= 31) {
+          res += '{AT ' + bytes[i + 1] + ',' + bytes[i + 2] + '}';
+          i += 3;
+          continue;
+        }
+        if (b === 23 && i + 2 < len) {
+          const tabCol = bytes[i + 1] | (bytes[i + 2] << 8);
+          res += '{TAB ' + tabCol + '}';
+          i += 3;
+          continue;
+        }
+        if (b >= 144 && b <= 164) {
+          res += '{' + String.fromCharCode(65 + (b - 144)) + '}';
+          i++;
+          continue;
+        }
+        if (b >= 32 && b <= 126) {
+          if (b === 34) {
+            res += '\\"';
+          } else {
+            res += String.fromCharCode(b);
+          }
+          i++;
+          continue;
+        }
+        res += '{CODE ' + b + '}';
+        i++;
+      }
+      return res;
+    }
+
     function readSpectrumVariables(readByte) {
       const varsStart = (readByte(0x5C4B) & 0xFF) | ((readByte(0x5C4C) & 0xFF) << 8);
       const vars = [];
@@ -337,16 +407,12 @@ function getTurbo80Html(webview, extensionUri, vscode) {
         } else if (type === 2) {
           const name = String.fromCharCode(96 + letterCode) + '$';
           const len = (readByte(p + 1) & 0xFF) | ((readByte(p + 2) & 0xFF) << 8);
-          let str = '';
+          const rawBytes = [];
           for (let i = 0; i < len; i++) {
-            const ch = readByte(p + 3 + i);
-            if (ch >= 32 && ch <= 126) {
-              str += String.fromCharCode(ch);
-            } else {
-              str += String.fromCharCode(92) + 'x' + ch.toString(16).padStart(2, '0').toUpperCase();
-            }
+            rawBytes.push(readByte(p + 3 + i));
           }
-          vars.push({ name, type: 'string', value: str, length: len });
+          const str = decodeSpectrumString(rawBytes);
+          vars.push({ name, type: 'string', value: str, length: len, rawBytes: rawBytes });
           p += 3 + len;
         } else if (type === 7) {
           const name = String.fromCharCode(96 + letterCode);

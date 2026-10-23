@@ -2682,6 +2682,74 @@ var require_debugger = __commonJS({
       if (b1 & 128) val = -val;
       return Math.round(val * 1e6) / 1e6;
     }
+    function decodeSpectrumString(bytes) {
+      if (!bytes || bytes.length === 0) return "";
+      let res = "";
+      let i = 0;
+      const len = bytes.length;
+      while (i < len) {
+        const b = bytes[i];
+        if (b === 16 && i + 1 < len && bytes[i + 1] <= 9) {
+          res += `{INK ${bytes[i + 1]}}`;
+          i += 2;
+          continue;
+        }
+        if (b === 17 && i + 1 < len && bytes[i + 1] <= 9) {
+          res += `{PAPER ${bytes[i + 1]}}`;
+          i += 2;
+          continue;
+        }
+        if (b === 18 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+          res += `{FLASH ${bytes[i + 1]}}`;
+          i += 2;
+          continue;
+        }
+        if (b === 19 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+          res += `{BRIGHT ${bytes[i + 1]}}`;
+          i += 2;
+          continue;
+        }
+        if (b === 20 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+          res += `{INVERSE ${bytes[i + 1]}}`;
+          i += 2;
+          continue;
+        }
+        if (b === 21 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+          res += `{OVER ${bytes[i + 1]}}`;
+          i += 2;
+          continue;
+        }
+        if (b === 22 && i + 2 < len && bytes[i + 1] <= 21 && bytes[i + 2] <= 31) {
+          res += `{AT ${bytes[i + 1]},${bytes[i + 2]}}`;
+          i += 3;
+          continue;
+        }
+        if (b === 23 && i + 2 < len) {
+          const tabCol = bytes[i + 1] | bytes[i + 2] << 8;
+          res += `{TAB ${tabCol}}`;
+          i += 3;
+          continue;
+        }
+        if (b >= 144 && b <= 164) {
+          const udgLetter = String.fromCharCode(65 + (b - 144));
+          res += `{${udgLetter}}`;
+          i++;
+          continue;
+        }
+        if (b >= 32 && b <= 126) {
+          if (b === 34) {
+            res += '\\"';
+          } else {
+            res += String.fromCharCode(b);
+          }
+          i++;
+          continue;
+        }
+        res += `{CODE ${b}}`;
+        i++;
+      }
+      return res;
+    }
     function readSpectrumVariables(readByte) {
       const varsStart = readByte(23627) & 255 | (readByte(23628) & 255) << 8;
       const vars = [];
@@ -2724,16 +2792,12 @@ var require_debugger = __commonJS({
         } else if (type === 2) {
           const name = String.fromCharCode(96 + letterCode) + "$";
           const len = readByte(p + 1) & 255 | (readByte(p + 2) & 255) << 8;
-          let str = "";
+          const rawBytes = [];
           for (let i = 0; i < len; i++) {
-            const ch = readByte(p + 3 + i);
-            if (ch >= 32 && ch <= 126) {
-              str += String.fromCharCode(ch);
-            } else {
-              str += `\\x${ch.toString(16).padStart(2, "0").toUpperCase()}`;
-            }
+            rawBytes.push(readByte(p + 3 + i));
           }
-          vars.push({ name, type: "string", value: str, length: len });
+          const str = decodeSpectrumString(rawBytes);
+          vars.push({ name, type: "string", value: str, length: len, rawBytes });
           p += 3 + len;
         } else if (type === 7) {
           const name = String.fromCharCode(96 + letterCode);
@@ -2974,25 +3038,52 @@ var require_debugger = __commonJS({
             break;
           }
           case "variables": {
-            const dapVars = (this.currentVars || []).map((v) => {
-              let valStr = "";
-              if (v.type === "string") {
-                valStr = `"${v.value}"`;
-              } else if (v.type === "for") {
-                valStr = `${v.value} (TO ${v.limit} STEP ${v.step})`;
-              } else {
-                valStr = String(v.value);
+            const varRef = args.variablesReference;
+            if (varRef === 1e3) {
+              const dapVars = (this.currentVars || []).map((v, idx) => {
+                let valStr = "";
+                let childRef = 0;
+                if (v.type === "string") {
+                  valStr = `"${v.value}"`;
+                  if (v.rawBytes && v.rawBytes.length > 0) {
+                    childRef = 2e3 + idx;
+                  }
+                } else if (v.type === "for") {
+                  valStr = `${v.value} (TO ${v.limit} STEP ${v.step})`;
+                } else {
+                  valStr = String(v.value);
+                }
+                return {
+                  name: v.name,
+                  value: valStr,
+                  type: v.type,
+                  variablesReference: childRef
+                };
+              });
+              this._sendSuccess(request, {
+                variables: dapVars
+              });
+            } else if (varRef >= 2e3) {
+              const varIdx = varRef - 2e3;
+              const targetVar = this.currentVars && this.currentVars[varIdx];
+              const children = [];
+              if (targetVar && targetVar.rawBytes) {
+                targetVar.rawBytes.forEach((b, i) => {
+                  const charDesc = b >= 32 && b <= 126 ? `"${String.fromCharCode(b)}"` : `{CODE ${b}}`;
+                  children.push({
+                    name: `(${i + 1})`,
+                    value: `${b}  ${charDesc}`,
+                    type: "CODE",
+                    variablesReference: 0
+                  });
+                });
               }
-              return {
-                name: v.name,
-                value: valStr,
-                type: v.type,
-                variablesReference: 0
-              };
-            });
-            this._sendSuccess(request, {
-              variables: dapVars
-            });
+              this._sendSuccess(request, {
+                variables: children
+              });
+            } else {
+              this._sendSuccess(request, { variables: [] });
+            }
             break;
           }
           case "continue": {
@@ -3069,7 +3160,8 @@ var require_debugger = __commonJS({
       readSpectrumVariables,
       findDocumentLine: findDocumentLine2,
       findStatementRange: findStatementRange2,
-      SinclairBasicDebugAdapterCore: SinclairBasicDebugAdapterCore2
+      SinclairBasicDebugAdapterCore: SinclairBasicDebugAdapterCore2,
+      decodeSpectrumString
     };
   }
 });
@@ -3368,6 +3460,76 @@ var require_turbo80Html = __commonJS({
       return Math.round(val * 1000000) / 1000000;
     }
 
+    function decodeSpectrumString(bytes) {
+      if (!bytes || bytes.length === 0) return '';
+      let res = '';
+      let i = 0;
+      const len = bytes.length;
+
+      while (i < len) {
+        const b = bytes[i];
+
+        if (b === 16 && i + 1 < len && bytes[i + 1] <= 9) {
+          res += '{INK ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 17 && i + 1 < len && bytes[i + 1] <= 9) {
+          res += '{PAPER ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 18 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+          res += '{FLASH ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 19 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1 || bytes[i + 1] === 8)) {
+          res += '{BRIGHT ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 20 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+          res += '{INVERSE ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 21 && i + 1 < len && (bytes[i + 1] === 0 || bytes[i + 1] === 1)) {
+          res += '{OVER ' + bytes[i + 1] + '}';
+          i += 2;
+          continue;
+        }
+        if (b === 22 && i + 2 < len && bytes[i + 1] <= 21 && bytes[i + 2] <= 31) {
+          res += '{AT ' + bytes[i + 1] + ',' + bytes[i + 2] + '}';
+          i += 3;
+          continue;
+        }
+        if (b === 23 && i + 2 < len) {
+          const tabCol = bytes[i + 1] | (bytes[i + 2] << 8);
+          res += '{TAB ' + tabCol + '}';
+          i += 3;
+          continue;
+        }
+        if (b >= 144 && b <= 164) {
+          res += '{' + String.fromCharCode(65 + (b - 144)) + '}';
+          i++;
+          continue;
+        }
+        if (b >= 32 && b <= 126) {
+          if (b === 34) {
+            res += '\\"';
+          } else {
+            res += String.fromCharCode(b);
+          }
+          i++;
+          continue;
+        }
+        res += '{CODE ' + b + '}';
+        i++;
+      }
+      return res;
+    }
+
     function readSpectrumVariables(readByte) {
       const varsStart = (readByte(0x5C4B) & 0xFF) | ((readByte(0x5C4C) & 0xFF) << 8);
       const vars = [];
@@ -3405,16 +3567,12 @@ var require_turbo80Html = __commonJS({
         } else if (type === 2) {
           const name = String.fromCharCode(96 + letterCode) + '$';
           const len = (readByte(p + 1) & 0xFF) | ((readByte(p + 2) & 0xFF) << 8);
-          let str = '';
+          const rawBytes = [];
           for (let i = 0; i < len; i++) {
-            const ch = readByte(p + 3 + i);
-            if (ch >= 32 && ch <= 126) {
-              str += String.fromCharCode(ch);
-            } else {
-              str += String.fromCharCode(92) + 'x' + ch.toString(16).padStart(2, '0').toUpperCase();
-            }
+            rawBytes.push(readByte(p + 3 + i));
           }
-          vars.push({ name, type: 'string', value: str, length: len });
+          const str = decodeSpectrumString(rawBytes);
+          vars.push({ name, type: 'string', value: str, length: len, rawBytes: rawBytes });
           p += 3 + len;
         } else if (type === 7) {
           const name = String.fromCharCode(96 + letterCode);
