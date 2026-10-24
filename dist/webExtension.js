@@ -2670,32 +2670,141 @@ var require_definitions = __commonJS({
 // src/core/share.js
 var require_share = __commonJS({
   "src/core/share.js"(exports2, module2) {
-    async function uploadTapToHost2(tapBytes, filename = "program.tap", fetchFn = fetch) {
+    var CATBOX_API_URL = "https://catbox.moe/user/api.php";
+    var LITTERBOX_API_URL = "https://litterbox.catbox.moe/resources/internals/api.php";
+    function toUint8Array(bytes) {
+      if (bytes instanceof Uint8Array) {
+        return bytes;
+      }
+      if (typeof Buffer !== "undefined" && Buffer.isBuffer(bytes)) {
+        return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      }
+      return new Uint8Array(bytes);
+    }
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    async function verifyRemoteFileSize(url, fetchFn) {
+      try {
+        const res = await fetchFn(url, { method: "HEAD" });
+        if (!res.ok) {
+          const getRes = await fetchFn(url, {
+            method: "GET",
+            headers: { "Range": "bytes=0-0" }
+          });
+          if (!getRes.ok) return { ok: false, size: 0 };
+          return { ok: true, size: 1 };
+        }
+        const lenHeader = res.headers && typeof res.headers.get === "function" ? res.headers.get("content-length") : res.headers && res.headers["content-length"];
+        if (lenHeader !== null && lenHeader !== void 0) {
+          const len = parseInt(lenHeader, 10);
+          if (!isNaN(len) && len === 0) {
+            return { ok: false, size: 0 };
+          }
+          return { ok: true, size: isNaN(len) ? -1 : len };
+        }
+        return { ok: true, size: -1 };
+      } catch (err) {
+        return { ok: true, size: -1 };
+      }
+    }
+    async function uploadToCatbox(bytes, safeFilename, fetchFn) {
+      const form = new FormData();
+      form.append("reqtype", "fileupload");
+      const file = new File([bytes], safeFilename, {
+        type: "application/octet-stream"
+      });
+      form.append("fileToUpload", file);
+      const res = await fetchFn(CATBOX_API_URL, {
+        method: "POST",
+        body: form,
+        headers: {
+          "User-Agent": "VSCode-Sinclair-BASIC/1.0.3"
+        }
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      }
+      const rawUrl = (await res.text()).trim();
+      if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
+        throw new Error(`Respuesta vac\xEDa o inesperada de Catbox: ${rawUrl}`);
+      }
+      return rawUrl;
+    }
+    async function uploadToLitterbox(bytes, safeFilename, fetchFn) {
+      const form = new FormData();
+      form.append("reqtype", "fileupload");
+      form.append("time", "72h");
+      const file = new File([bytes], safeFilename, {
+        type: "application/octet-stream"
+      });
+      form.append("fileToUpload", file);
+      const res = await fetchFn(LITTERBOX_API_URL, {
+        method: "POST",
+        body: form,
+        headers: {
+          "User-Agent": "VSCode-Sinclair-BASIC/1.0.3"
+        }
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      }
+      const rawUrl = (await res.text()).trim();
+      if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
+        throw new Error(`Respuesta vac\xEDa o inesperada de Litterbox: ${rawUrl}`);
+      }
+      return rawUrl;
+    }
+    async function uploadTapToHost2(tapBytes, filename = "program.tap", fetchFn = fetch, options = {}) {
       if (!tapBytes || tapBytes.length === 0) {
         throw new Error("El archivo TAP est\xE1 vac\xEDo o no se gener\xF3 correctamente.");
       }
       const safeFilename = filename.toLowerCase().endsWith(".tap") ? filename : `${filename}.tap`;
-      const form = new FormData();
-      form.append("reqtype", "fileupload");
-      const file = new File([tapBytes], safeFilename, {
-        type: "application/octet-stream"
-      });
-      form.append("fileToUpload", file);
-      const res = await fetchFn("https://catbox.moe/user/api.php", {
-        method: "POST",
-        body: form,
-        headers: {
-          "User-Agent": "VSCode-Sinclair-BASIC/1.0.1"
+      const maxRetries = options.maxRetries !== void 0 ? options.maxRetries : 3;
+      const retryDelay = options.retryDelay !== void 0 ? options.retryDelay : 600;
+      const onProgress = typeof options.onProgress === "function" ? options.onProgress : () => {
+      };
+      let currentBytes = toUint8Array(tapBytes);
+      let lastError = null;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          if (attempt > 1) {
+            onProgress(`Reintentando subida a Catbox (intento ${attempt}/${maxRetries})...`);
+          }
+          const rawUrl = await uploadToCatbox(currentBytes, safeFilename, fetchFn);
+          if (options.verifyIntegrity !== false) {
+            onProgress("Verificando integridad de la cinta en el servidor...");
+            const check = await verifyRemoteFileSize(rawUrl, fetchFn);
+            if (!check.ok && check.size === 0) {
+              const padded = new Uint8Array(currentBytes.length + 1);
+              padded.set(currentBytes);
+              padded[currentBytes.length] = 0;
+              currentBytes = padded;
+              if (attempt < maxRetries) {
+                onProgress("Cach\xE9 de 0 bytes detectada en el servidor. Reintentando con evasi\xF3n de hash...");
+                await sleep(retryDelay);
+                continue;
+              }
+            }
+          }
+          return rawUrl;
+        } catch (err) {
+          lastError = err;
+          if (attempt < maxRetries) {
+            await sleep(retryDelay);
+          }
         }
-      });
-      if (!res.ok) {
-        throw new Error(`Error en el servidor de alojamiento (${res.status} ${res.statusText})`);
       }
-      const rawUrl = (await res.text()).trim();
-      if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
-        throw new Error(`Respuesta inesperada al alojar la cinta: ${rawUrl}`);
+      if (options.useFallback !== false) {
+        try {
+          onProgress("Catbox temporalmente no disponible. Conmutando a Litterbox (72h)...");
+          const litterUrl = await uploadToLitterbox(currentBytes, safeFilename, fetchFn);
+          return litterUrl;
+        } catch (fallbackErr) {
+          lastError = new Error(`Catbox (${lastError.message}) y Litterbox (${fallbackErr.message})`);
+        }
       }
-      return rawUrl;
+      throw new Error(`Error en el servidor de alojamiento: ${lastError.message}`);
     }
     function buildTurbo80ShareUrl2(tapPublicUrl, options = {}) {
       if (!tapPublicUrl) {
@@ -4670,8 +4779,9 @@ ${all.errors.join("\n")}`);
           cancellable: false
         },
         async (progress) => {
-          progress.report({ message: "Subiendo archivo .tap..." });
-          const publicTapUrl = await uploadTapToHost(tapBytes, filename);
+          const publicTapUrl = await uploadTapToHost(tapBytes, filename, fetch, {
+            onProgress: (msg) => progress.report({ message: msg })
+          });
           progress.report({ message: "Generando enlace web de Turbo80..." });
           const shareUrl = buildTurbo80ShareUrl(publicTapUrl, { model, crt });
           await vscode.env.clipboard.writeText(shareUrl);

@@ -862,8 +862,9 @@ function activate(context) {
           cancellable: false
         },
         async (progress) => {
-          progress.report({ message: 'Subiendo archivo .tap...' });
-          const publicTapUrl = await uploadTapToHost(tapBytes, filename);
+          const publicTapUrl = await uploadTapToHost(tapBytes, filename, fetch, {
+            onProgress: (msg) => progress.report({ message: msg })
+          });
 
           progress.report({ message: 'Generando enlace web de Turbo80...' });
           const shareUrl = buildTurbo80ShareUrl(publicTapUrl, { model, crt });
