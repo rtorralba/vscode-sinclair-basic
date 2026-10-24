@@ -31,5 +31,11 @@
       "\"",
       "\""
     ]
-  ]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*\\d+\\s+(REM\\s+(?:SUB|FUNCTION|PROCEDURE|ROUTINE)\\b|GO\\s*SUB\\b|GOSUB\\b|FOR\\b)",
+      "end": "^\\s*\\d+\\s+(RETURN\\b|NEXT\\b)"
+    }
+  }
 }

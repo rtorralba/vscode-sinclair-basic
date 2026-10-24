@@ -1,10 +1,11 @@
 /**
- * Sinclair BASIC (.bas) Subroutine Folding Provider Engine
+ * Sinclair BASIC (.bas) Subroutine & Function Folding Provider Engine
  * 
- * Accurately detects subroutine functions in standard Sinclair BASIC (.bas):
- * When a `GO SUB <line>` / `GOSUB <line>` is encountered in the program,
- * identifies the function starting at that line number and folds up to its
- * corresponding `RETURN` statement.
+ * Accurately detects routines and blocks in standard Sinclair BASIC (.bas):
+ * 1. Functions/subroutines with explicit headers:
+ *    `REM SUB <Name>`, `REM FUNCTION <Name>`, `REM PROCEDURE <Name>`, `REM ROUTINE <Name>`
+ * 2. Subroutines called via `GO SUB <line>` / `GOSUB <line>` folding to their `RETURN`
+ * 3. Structured loops: `FOR <var> = ...` to `NEXT <var>`
  */
 
 /**
@@ -49,7 +50,7 @@ function getCodeOutsideStringsAndRem(line) {
 }
 
 /**
- * Calculates subroutine folding ranges for Sinclair BASIC (.bas) programs.
+ * Calculates subroutine and loop folding ranges for Sinclair BASIC (.bas) programs.
  * 
  * @param {string|string[]} input - Full text or array of line strings
  * @returns {Array<{ start: number, end: number, kind?: string }>}
@@ -60,12 +61,17 @@ function getBasFoldingRanges(input) {
 
   // 1. Map Sinclair BASIC line numbers to 0-indexed document line numbers
   const lineNumToIndex = new Map();
+  const subHeaderIndices = new Set();
+  const subHeaderRegex = /^\s*(\d+)\s+REM\s+(?:SUB|FUNCTION|PROCEDURE|ROUTINE)\b/i;
 
   for (let i = 0; i < lineCount; i++) {
     const m = lines[i].match(/^\s*(\d+)/);
     if (m) {
       const num = parseInt(m[1], 10);
       lineNumToIndex.set(num, i);
+      if (subHeaderRegex.test(lines[i])) {
+        subHeaderIndices.add(i);
+      }
     }
   }
 
@@ -82,29 +88,42 @@ function getBasFoldingRanges(input) {
       const targets = targetsStr.split(',').map(s => parseInt(s.trim(), 10));
       for (const t of targets) {
         if (!isNaN(t) && lineNumToIndex.has(t)) {
-          gosubTargets.add(t);
+          let idx = lineNumToIndex.get(t);
+          // If the line immediately preceding is a REM SUB header, include the header
+          if (idx > 0 && subHeaderIndices.has(idx - 1)) {
+            idx = idx - 1;
+          }
+          gosubTargets.add(idx);
         }
       }
     }
   }
 
-  // 3. Sort targets by document line index
-  const sortedTargets = Array.from(gosubTargets)
-    .map(num => ({ num, lineIndex: lineNumToIndex.get(num) }))
-    .sort((a, b) => a.lineIndex - b.lineIndex);
+  // 3. Combine routine starts (explicit REM SUB headers and GO SUB targets)
+  const allRoutineStarts = new Set([...subHeaderIndices, ...gosubTargets]);
+  const sortedStarts = Array.from(allRoutineStarts).sort((a, b) => a - b);
 
   const ranges = [];
+  const seenRanges = new Set();
 
-  for (let t = 0; t < sortedTargets.length; t++) {
-    const current = sortedTargets[t];
-    const startLineIndex = current.lineIndex;
+  function addRange(start, end, kind = 'region') {
+    if (end > start) {
+      const key = `${start}:${end}`;
+      if (!seenRanges.has(key)) {
+        seenRanges.add(key);
+        ranges.push({ start, end, kind });
+      }
+    }
+  }
 
-    // Boundary: the start of the next subroutine or the end of the document
-    const nextSubLineIndex = (t + 1 < sortedTargets.length)
-      ? sortedTargets[t + 1].lineIndex
+  // 4. Determine routine boundaries
+  for (let t = 0; t < sortedStarts.length; t++) {
+    const startLineIndex = sortedStarts[t];
+    const nextSubLineIndex = (t + 1 < sortedStarts.length)
+      ? sortedStarts[t + 1]
       : lineCount;
 
-    // Search for lines containing the RETURN statement between startLineIndex and nextSubLineIndex - 1
+    // Search for RETURN statements between startLineIndex and nextSubLineIndex - 1
     let lastReturnLineIndex = -1;
     for (let k = startLineIndex; k < nextSubLineIndex; k++) {
       const lineCode = getCodeOutsideStringsAndRem(lines[k]);
@@ -114,15 +133,48 @@ function getBasFoldingRanges(input) {
     }
 
     if (lastReturnLineIndex > startLineIndex) {
-      ranges.push({
-        start: startLineIndex,
-        end: lastReturnLineIndex,
-        kind: 'region'
-      });
+      addRange(startLineIndex, lastReturnLineIndex);
+    } else if (subHeaderIndices.has(startLineIndex)) {
+      // Routines without RETURN (e.g. main loop ending in GO TO or STOP)
+      // Fold up to the last non-empty line before the next routine
+      let lastCodeLine = nextSubLineIndex - 1;
+      while (lastCodeLine > startLineIndex && !lines[lastCodeLine].trim()) {
+        lastCodeLine--;
+      }
+      if (lastCodeLine > startLineIndex) {
+        addRange(startLineIndex, lastCodeLine);
+      }
     }
   }
 
-  return ranges;
+  // 5. Detect FOR ... NEXT loops
+  const forStack = [];
+  for (let i = 0; i < lineCount; i++) {
+    const lineCode = getCodeOutsideStringsAndRem(lines[i]);
+    const forMatches = lineCode.match(/\bFOR\b/gi);
+    if (forMatches) {
+      for (let f = 0; f < forMatches.length; f++) {
+        forStack.push(i);
+      }
+    }
+    const nextMatches = lineCode.match(/\bNEXT\b/gi);
+    if (nextMatches) {
+      for (let n = 0; n < nextMatches.length; n++) {
+        if (forStack.length > 0) {
+          const forStart = forStack.pop();
+          if (i > forStart) {
+            addRange(forStart, i);
+          }
+        }
+      }
+    }
+  }
+
+  // Sort ranges: start ascending, end descending
+  return ranges.sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    return b.end - a.end;
+  });
 }
 
 module.exports = {

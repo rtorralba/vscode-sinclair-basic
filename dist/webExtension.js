@@ -2509,11 +2509,16 @@ var require_folding = __commonJS({
       const lines = Array.isArray(input) ? input : input.split(/\r?\n/);
       const lineCount = lines.length;
       const lineNumToIndex = /* @__PURE__ */ new Map();
+      const subHeaderIndices = /* @__PURE__ */ new Set();
+      const subHeaderRegex = /^\s*(\d+)\s+REM\s+(?:SUB|FUNCTION|PROCEDURE|ROUTINE)\b/i;
       for (let i = 0; i < lineCount; i++) {
         const m = lines[i].match(/^\s*(\d+)/);
         if (m) {
           const num = parseInt(m[1], 10);
           lineNumToIndex.set(num, i);
+          if (subHeaderRegex.test(lines[i])) {
+            subHeaderIndices.add(i);
+          }
         }
       }
       const gosubTargets = /* @__PURE__ */ new Set();
@@ -2526,17 +2531,31 @@ var require_folding = __commonJS({
           const targets = targetsStr.split(",").map((s) => parseInt(s.trim(), 10));
           for (const t of targets) {
             if (!isNaN(t) && lineNumToIndex.has(t)) {
-              gosubTargets.add(t);
+              let idx = lineNumToIndex.get(t);
+              if (idx > 0 && subHeaderIndices.has(idx - 1)) {
+                idx = idx - 1;
+              }
+              gosubTargets.add(idx);
             }
           }
         }
       }
-      const sortedTargets = Array.from(gosubTargets).map((num) => ({ num, lineIndex: lineNumToIndex.get(num) })).sort((a, b) => a.lineIndex - b.lineIndex);
+      const allRoutineStarts = /* @__PURE__ */ new Set([...subHeaderIndices, ...gosubTargets]);
+      const sortedStarts = Array.from(allRoutineStarts).sort((a, b) => a - b);
       const ranges = [];
-      for (let t = 0; t < sortedTargets.length; t++) {
-        const current = sortedTargets[t];
-        const startLineIndex = current.lineIndex;
-        const nextSubLineIndex = t + 1 < sortedTargets.length ? sortedTargets[t + 1].lineIndex : lineCount;
+      const seenRanges = /* @__PURE__ */ new Set();
+      function addRange(start, end, kind = "region") {
+        if (end > start) {
+          const key = `${start}:${end}`;
+          if (!seenRanges.has(key)) {
+            seenRanges.add(key);
+            ranges.push({ start, end, kind });
+          }
+        }
+      }
+      for (let t = 0; t < sortedStarts.length; t++) {
+        const startLineIndex = sortedStarts[t];
+        const nextSubLineIndex = t + 1 < sortedStarts.length ? sortedStarts[t + 1] : lineCount;
         let lastReturnLineIndex = -1;
         for (let k = startLineIndex; k < nextSubLineIndex; k++) {
           const lineCode = getCodeOutsideStringsAndRem(lines[k]);
@@ -2545,14 +2564,42 @@ var require_folding = __commonJS({
           }
         }
         if (lastReturnLineIndex > startLineIndex) {
-          ranges.push({
-            start: startLineIndex,
-            end: lastReturnLineIndex,
-            kind: "region"
-          });
+          addRange(startLineIndex, lastReturnLineIndex);
+        } else if (subHeaderIndices.has(startLineIndex)) {
+          let lastCodeLine = nextSubLineIndex - 1;
+          while (lastCodeLine > startLineIndex && !lines[lastCodeLine].trim()) {
+            lastCodeLine--;
+          }
+          if (lastCodeLine > startLineIndex) {
+            addRange(startLineIndex, lastCodeLine);
+          }
         }
       }
-      return ranges;
+      const forStack = [];
+      for (let i = 0; i < lineCount; i++) {
+        const lineCode = getCodeOutsideStringsAndRem(lines[i]);
+        const forMatches = lineCode.match(/\bFOR\b/gi);
+        if (forMatches) {
+          for (let f = 0; f < forMatches.length; f++) {
+            forStack.push(i);
+          }
+        }
+        const nextMatches = lineCode.match(/\bNEXT\b/gi);
+        if (nextMatches) {
+          for (let n = 0; n < nextMatches.length; n++) {
+            if (forStack.length > 0) {
+              const forStart = forStack.pop();
+              if (i > forStart) {
+                addRange(forStart, i);
+              }
+            }
+          }
+        }
+      }
+      return ranges.sort((a, b) => {
+        if (a.start !== b.start) return a.start - b.start;
+        return b.end - a.end;
+      });
     }
     module2.exports = {
       getCodeOutsideStringsAndRem,

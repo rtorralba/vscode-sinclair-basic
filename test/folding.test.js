@@ -99,3 +99,68 @@ test('getBasFoldingRanges protects against false positives in strings, REM, and 
   const ranges = getBasFoldingRanges(code);
   assert.equal(ranges.length, 0);
 });
+
+test('getBasFoldingRanges detects routines with REM SUB headers and loops', () => {
+  const code = [
+    '10 GO TO 100',
+    '20 REM SUB Main Loop',        // 1
+    '30 LET x = x + 1',            // 2
+    '40 GO TO 20',                 // 3
+    '100 REM SUB Init Game',       // 4
+    '110 FOR i = 1 TO 10',         // 5
+    '120 PRINT i',                 // 6
+    '130 NEXT i',                  // 7
+    '140 RETURN'                   // 8
+  ];
+
+  const ranges = getBasFoldingRanges(code);
+  // Expect 3 ranges:
+  // 1) Main loop: index 1 to 3
+  // 2) Init Game: index 4 to 8
+  // 3) FOR loop: index 5 to 7
+  assert.equal(ranges.length, 3);
+
+  const mainLoop = ranges.find(r => r.start === 1);
+  assert.ok(mainLoop);
+  assert.equal(mainLoop.end, 3);
+
+  const initGame = ranges.find(r => r.start === 4);
+  assert.ok(initGame);
+  assert.equal(initGame.end, 8);
+
+  const forLoop = ranges.find(r => r.start === 5);
+  assert.ok(forLoop);
+  assert.equal(forLoop.end, 7);
+});
+
+test('getBasFoldingRanges correctly detects all subroutines in dino-basic.bas', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const dinoPath = 'C:/Users/rault/dev/basic/Dino/dino-basic.bas';
+
+  if (!fs.existsSync(dinoPath)) {
+    return; // Skip if external path doesn't exist in environment
+  }
+
+  const content = fs.readFileSync(dinoPath, 'utf8');
+  const ranges = getBasFoldingRanges(content);
+
+  // Must detect routines and loop in Dino
+  assert.ok(ranges.length >= 14);
+
+  // Line 20: REM SUB Bucle Principal (line index 1)
+  const buclePrincipal = ranges.find(r => r.start === 1);
+  assert.ok(buclePrincipal, 'Bucle Principal should fold');
+  assert.equal(buclePrincipal.end, 23); // line 240: GO TO 20
+
+  // Line 250: REM SUB Point (line index 24)
+  const subPoint = ranges.find(r => r.start === 24);
+  assert.ok(subPoint, 'Point subroutine should fold');
+  assert.equal(subPoint.end, 26); // line 270: RETURN
+
+  // Line 1130: REM SUB Menu (line index 112)
+  const subMenu = ranges.find(r => r.start === 112);
+  assert.ok(subMenu, 'Menu subroutine should fold');
+  assert.equal(subMenu.end, 120); // line 1210: RETURN
+});
+
