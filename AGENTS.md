@@ -57,6 +57,8 @@ vscode-sinclair-basic/
 |       |-- renumber.js                  # Core engine: Sinclair BASIC line renumbering & jump target updates
 |       |-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
 |       |-- tapGenerator.js              # Core engine: Native Pure JS ZX Spectrum .tap generator
+|       |-- tapDecoder.js                # Core engine: ZX Spectrum .tap decoder to Sinclair BASIC (.bas) and .jbas
+|       |-- bas2jbas.js                  # Core engine: Converts numbered Sinclair BASIC (.bas) to modern .jbas with @labels
 |       |-- wildcards.js                 # Core engine: Translates bas2tap wildcards to standard Sinclair BASIC CHR$
 |       |-- folding.js                   # Core engine: Subroutine folding range provider for standard .bas (GO SUB -> RETURN)
 |       |-- definitions.js               # Core engine: Jump target detector & Go to Definition (Ctrl+Click) for standard .bas
@@ -74,6 +76,8 @@ vscode-sinclair-basic/
 |   |-- renumber.test.js                 # Unit tests for renumbering engine
 |   |-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
 |   |-- tapGenerator.test.js             # Unit tests for pure JS tap generator
+|   |-- tapDecoder.test.js               # Unit tests for TAP decoder and detokenizer
+|   |-- bas2jbas.test.js                 # Unit tests for BAS to JBAS converter
 |   |-- wildcards.test.js                # Unit tests for wildcard to CHR$ translator
 |   |-- folding.test.js                  # Unit tests for .bas subroutine folding range provider
 |   |-- definitions.test.js              # Unit tests for .bas jump target Go to Definition provider
@@ -143,10 +147,11 @@ vscode-sinclair-basic/
    - `sinclairBasic.debugTurbo80`: Depurador interactivo paso a paso integrado con la **barra flotante y paneles nativos de depuración de VS Code (DAP - Debug Adapter Protocol)**. Intercepta el despachador de sentencias de la ROM del 48K (`0x1B3D`) mediante condiciones de punto de interrupción nativas en Turbo80 (`spectrum.bpConds`), permitiendo ejecución a 50 FPS sin sobrecarga hasta alcanzar un breakpoint o paso. Se controla directamente desde la **barra nativa flotante de VS Code** (`F5` Iniciar/Continuar, `F6` Pausar, `F10` Paso de línea / Step Over, `F11` Paso de sentencia / Step Into, `Ctrl+Shift+F5` Reiniciar, `Shift+F5` Detener) y puebla en tiempo real la pestaña **Variables** (VARS en RAM: floats de 5 bytes, cadenas y FOR) y la **Pila de llamadas** (Call Stack) nativas de VS Code. La ventana del emulador se mantiene 100% limpia sin botones apretujados, enfocada en la pantalla auténtica del ZX Spectrum.
    - **Tabla de equivalencia y Source Mapping `.jbas` <-> `.bas`**: Cuando se depura desde un archivo `.jbas`, el transpilador genera la tabla de equivalencias numéricas línea a línea (`basicToSource` y `sourceToBasic`: números enteros 1-a-1). Los breakpoints puestos en el `.jbas` se traducen automáticamente a las líneas reales del `.bas` compilado en la cinta TAP del emulador (incluyendo escaneo hacia adelante en comentarios o líneas en blanco), y cuando el emulador se pausa en cualquier línea/sentencia, VS Code resalta la línea y sentencia exacta en el documento `.jbas` activo y puebla la pila de llamadas nativa con el archivo `.jbas`. Si se depura desde un `.bas`, la correspondencia se mantiene 100% directa en `.bas`.
    - **Puntos de interrupción por sentencia (Inline Breakpoints)**: Soporte completo para breakpoints en sentencias individuales dentro de una misma línea (`LET a=1: LET b=2`). Compatible con `Shift+F9` (Punto de interrupción de columna / Inline Breakpoint en VS Code), clic en glyphs internos o pulsando `F9` con el cursor sobre la sentencia concreta. Turbo80 evalúa en ROM 48K (`0x1B3D`) tanto la línea (`PPC` 0x5C45) como el índice de sentencia (`SUBPPC` 0x5C47), deteniéndose exactamente en la sentencia marcada.
+   - `sinclairBasic.importTap` / `sinclairBasic.importTapToBas` / `sinclairBasic.importTapToJBas`: Decodifica archivos de cinta `.tap` extrayendo el programa Sinclair BASIC en versión estándar `.bas` y en versión moderna `.jbas` (con etiquetas `@label:`, comentarios `'`, sin números de línea y con indentación). Permite importar directamente desde el menú contextual del explorador en cualquier archivo `.tap` o desde la paleta de comandos con selector de archivos.
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
 6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 97 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 117 passing tests.
 
 ---
 

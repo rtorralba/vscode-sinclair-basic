@@ -139,6 +139,22 @@
         "icon": "$(package)"
       },
       {
+        "command": "sinclairBasic.importTap",
+        "title": "Import BAS and JBAS from TAP",
+        "category": "Sinclair BASIC",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "sinclairBasic.importTapToBas",
+        "title": "Import BAS from TAP",
+        "category": "Sinclair BASIC"
+      },
+      {
+        "command": "sinclairBasic.importTapToJBas",
+        "title": "Import JBAS from TAP",
+        "category": "Sinclair BASIC"
+      },
+      {
         "command": "sinclairBasic.renumber",
         "title": "Renumber BAS Lines (.bas)",
         "category": "Sinclair BASIC",
@@ -377,6 +393,11 @@
           "command": "sinclairBasic.shareTurbo80",
           "when": "resourceExtname == .bas || resourceExtname == .jbas || resourceExtname == .tap",
           "group": "sinclair@5"
+        },
+        {
+          "command": "sinclairBasic.importTap",
+          "when": "resourceExtname == .tap",
+          "group": "sinclair@1"
         }
       ]
     },

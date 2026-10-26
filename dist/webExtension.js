@@ -1322,6 +1322,41 @@ var require_tapGenerator = __commonJS({
           }
           continue;
         }
+        if (line[i] === "{") {
+          const closeIdx = line.indexOf("}", i + 1);
+          if (closeIdx !== -1) {
+            const content = line.slice(i + 1, closeIdx).trim();
+            const upper = content.toUpperCase();
+            let m = upper.match(/^CODE\s+(\d+)$/);
+            if (m) {
+              res.push(parseInt(m[1], 10) & 255);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^#([0-9A-F]{1,2})$/);
+            if (m) {
+              res.push(parseInt(m[1], 16) & 255);
+              i = closeIdx + 1;
+              continue;
+            }
+            m = upper.match(/^\\X([0-9A-F]{1,2})$/);
+            if (m) {
+              res.push(parseInt(m[1], 16) & 255);
+              i = closeIdx + 1;
+              continue;
+            }
+            if (content.length === 1 && upper >= "A" && upper <= "U") {
+              res.push(144 + upper.charCodeAt(0) - 65);
+              i = closeIdx + 1;
+              continue;
+            }
+            if (content === "(c)" || content === "(C)") {
+              res.push(127);
+              i = closeIdx + 1;
+              continue;
+            }
+          }
+        }
         const sub = line.substr(i);
         const matchNum = sub.match(/^(\d+(?:\.\d+)?|\.\d+)/);
         if (matchNum) {
@@ -4175,6 +4210,689 @@ var require_turbo80Html = __commonJS({
   }
 });
 
+// src/core/bas2jbas.js
+var require_bas2jbas = __commonJS({
+  "src/core/bas2jbas.js"(exports2, module2) {
+    var path;
+    try {
+      path = require("path");
+    } catch {
+      path = null;
+    }
+    var { splitStringsAndRem } = require_renumber();
+    function slugifyTitle(text) {
+      let clean = text.replace(/^SUB\s+/i, "").replace(/[*#=_\-]+/g, " ").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      if (!clean) return "";
+      if (/^[0-9]/.test(clean)) {
+        clean = "label_" + clean;
+      }
+      return clean;
+    }
+    function parseBasLines(basText) {
+      const rawLines = basText.split(/\r?\n/);
+      const parsed = [];
+      for (let i = 0; i < rawLines.length; i++) {
+        const raw = rawLines[i];
+        const match = raw.match(/^\s*(\d+)\s*(.*)$/);
+        if (!match) continue;
+        const lineNum = parseInt(match[1], 10);
+        const code = match[2];
+        let remTitle = "";
+        const remMatch = code.match(/^\s*REM\s+(?:SUB\s+)?([A-Za-z0-9\s_\-]+)$/i);
+        if (remMatch) {
+          remTitle = slugifyTitle(remMatch[1]);
+        }
+        parsed.push({ lineNum, code, raw, remTitle });
+      }
+      return parsed;
+    }
+    function findJumpTargets(lines) {
+      const targets = /* @__PURE__ */ new Map();
+      const jumpPattern = /\b(GO\s*TO|GOTO|GO\s*SUB|GOSUB|RUN|RESTORE|LINE|THEN)\s+(\d+(?:\s*,\s*\d+)*)/gi;
+      for (const line of lines) {
+        const chunks = splitStringsAndRem(line.code);
+        for (const chunk of chunks) {
+          if (chunk.type !== "code") continue;
+          let match;
+          jumpPattern.lastIndex = 0;
+          while ((match = jumpPattern.exec(chunk.text)) !== null) {
+            const matchEnd = match.index + match[0].length;
+            const rest = chunk.text.slice(matchEnd);
+            if (/^\s*[*\/+\-^<>=.(a-zA-Z_]/.test(rest)) {
+              continue;
+            }
+            const keyword = match[1].toUpperCase().replace(/\s+/g, "");
+            const targetList = match[2];
+            const isSub = keyword === "GOSUB";
+            const numbers = targetList.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+            for (const num of numbers) {
+              const existing = targets.get(num) || { isSub: false, count: 0 };
+              existing.count++;
+              if (isSub) existing.isSub = true;
+              targets.set(num, existing);
+            }
+          }
+        }
+      }
+      return targets;
+    }
+    function generateLabels(lines, targets) {
+      const lineMap = /* @__PURE__ */ new Map();
+      lines.forEach((l) => lineMap.set(l.lineNum, l));
+      const labelMap = /* @__PURE__ */ new Map();
+      const usedNames = /* @__PURE__ */ new Set();
+      function assignUnique(lineNum, baseName) {
+        let name = baseName || `line_${lineNum}`;
+        let candidate = name;
+        let counter = 2;
+        while (usedNames.has(candidate)) {
+          candidate = `${name}_${counter}`;
+          counter++;
+        }
+        usedNames.add(candidate);
+        labelMap.set(lineNum, candidate);
+      }
+      for (const [lineNum, info] of targets.entries()) {
+        const line = lineMap.get(lineNum);
+        if (line && line.remTitle) {
+          assignUnique(lineNum, line.remTitle);
+        }
+      }
+      for (const [lineNum, info] of targets.entries()) {
+        if (labelMap.has(lineNum)) continue;
+        if (info.isSub) {
+          assignUnique(lineNum, `sub_${lineNum}`);
+        } else {
+          assignUnique(lineNum, `line_${lineNum}`);
+        }
+      }
+      return labelMap;
+    }
+    function updateJumpsToLabels(code, labelMap) {
+      const chunks = splitStringsAndRem(code);
+      const jumpPattern = /\b(GO\s*TO|GOTO|GO\s*SUB|GOSUB|RUN|RESTORE|LINE|THEN)\s+(\d+(?:\s*,\s*\d+)*)/gi;
+      const newChunks = chunks.map((chunk) => {
+        if (chunk.type !== "code") return chunk.text;
+        return chunk.text.replace(jumpPattern, (fullMatch, keyword, targetsStr, offset, string) => {
+          const matchEnd = offset + fullMatch.length;
+          const rest = string.slice(matchEnd);
+          if (/^\s*[*\/+\-^<>=.(a-zA-Z_]/.test(rest)) {
+            return fullMatch;
+          }
+          const parts = targetsStr.split(/(\s*,\s*)/);
+          const updatedParts = [];
+          for (const part of parts) {
+            const trimmed = part.trim();
+            if (/^\d+$/.test(trimmed)) {
+              const targetNum = parseInt(trimmed, 10);
+              if (labelMap.has(targetNum)) {
+                const labelName = labelMap.get(targetNum);
+                const leading = part.slice(0, part.length - part.trimStart().length);
+                const trailing = part.slice(part.trimEnd().length);
+                updatedParts.push(`${leading}@${labelName}${trailing}`);
+                continue;
+              }
+            }
+            updatedParts.push(part);
+          }
+          return `${keyword} ${updatedParts.join("")}`;
+        });
+      });
+      return newChunks.join("");
+    }
+    function convertRemToSingleQuote(lineCode) {
+      const chunks = splitStringsAndRem(lineCode);
+      let res = "";
+      for (let idx = 0; idx < chunks.length; idx++) {
+        const chunk = chunks[idx];
+        if (chunk.type === "rem") {
+          const remText = chunk.text.replace(/^REM\s*/i, "");
+          if (res.trim().length === 0) {
+            res = `' ${remText}`.trimEnd();
+          } else {
+            res = res.replace(/:\s*$/, "").trimEnd();
+            res += ` ' ${remText}`.trimEnd();
+          }
+          break;
+        } else {
+          res += chunk.text;
+        }
+      }
+      return res;
+    }
+    function basToJBas2(basText, options = {}) {
+      const convertComments = options.convertComments !== false;
+      const indentSpaces = typeof options.indent === "number" ? " ".repeat(options.indent) : "  ";
+      const isCRLF = basText.includes("\r\n");
+      const eol = isCRLF ? "\r\n" : "\n";
+      const lines = parseBasLines(basText);
+      if (lines.length === 0) return "";
+      const jumpTargets = findJumpTargets(lines);
+      const labelMap = generateLabels(lines, jumpTargets);
+      const outputLines = [];
+      let inLabelBlock = false;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        let code = line.code;
+        code = updateJumpsToLabels(code, labelMap);
+        if (convertComments) {
+          code = convertRemToSingleQuote(code);
+        }
+        if (labelMap.has(line.lineNum)) {
+          const labelName = labelMap.get(line.lineNum);
+          if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== "") {
+            outputLines.push("");
+          }
+          outputLines.push(`@${labelName}:`);
+          inLabelBlock = true;
+          if (line.remTitle && line.code.match(/^\s*REM\s+(?:SUB\s+)?([A-Za-z0-9\s_\-]+)$/i)) {
+            continue;
+          }
+          if (code.trim().length > 0) {
+            outputLines.push(`${indentSpaces}${code.trim()}`);
+          }
+        } else {
+          if (code.trim().length === 0) continue;
+          if (inLabelBlock) {
+            outputLines.push(`${indentSpaces}${code.trim()}`);
+          } else {
+            outputLines.push(code.trim());
+          }
+        }
+      }
+      return outputLines.join(eol) + eol;
+    }
+    module2.exports = {
+      slugifyTitle,
+      parseBasLines,
+      findJumpTargets,
+      generateLabels,
+      updateJumpsToLabels,
+      convertRemToSingleQuote,
+      basToJBas: basToJBas2
+    };
+  }
+});
+
+// src/core/tapDecoder.js
+var require_tapDecoder = __commonJS({
+  "src/core/tapDecoder.js"(exports2, module2) {
+    var { KEYWORDS } = require_tapGenerator();
+    var { decodeSinclairFloat } = require_debugger();
+    var { basToJBas: basToJBas2 } = require_bas2jbas();
+    var TOKEN_TO_KEYWORD = {
+      165: "RND",
+      166: "INKEY$",
+      167: "PI",
+      168: "FN",
+      169: "POINT",
+      170: "SCREEN$",
+      171: "ATTR",
+      172: "AT",
+      173: "TAB",
+      174: "VAL$",
+      175: "CODE",
+      176: "VAL",
+      177: "LEN",
+      178: "SIN",
+      179: "COS",
+      180: "TAN",
+      181: "ASN",
+      182: "ACS",
+      183: "ATN",
+      184: "LN",
+      185: "EXP",
+      186: "INT",
+      187: "SQR",
+      188: "SGN",
+      189: "ABS",
+      190: "PEEK",
+      191: "IN",
+      192: "USR",
+      193: "STR$",
+      194: "CHR$",
+      195: "NOT",
+      196: "BIN",
+      197: "OR",
+      198: "AND",
+      199: "<=",
+      200: ">=",
+      201: "<>",
+      202: "LINE",
+      203: "THEN",
+      204: "TO",
+      205: "STEP",
+      206: "DEF FN",
+      207: "CAT",
+      208: "FORMAT",
+      209: "MOVE",
+      210: "ERASE",
+      211: "OPEN #",
+      212: "CLOSE #",
+      213: "MERGE",
+      214: "VERIFY",
+      215: "BEEP",
+      216: "CIRCLE",
+      217: "INK",
+      218: "PAPER",
+      219: "FLASH",
+      220: "BRIGHT",
+      221: "INVERSE",
+      222: "OVER",
+      223: "OUT",
+      224: "LPRINT",
+      225: "LLIST",
+      226: "STOP",
+      227: "READ",
+      228: "DATA",
+      229: "RESTORE",
+      230: "NEW",
+      231: "BORDER",
+      232: "CONTINUE",
+      233: "DIM",
+      234: "REM",
+      235: "FOR",
+      236: "GO TO",
+      237: "GO SUB",
+      238: "INPUT",
+      239: "LOAD",
+      240: "LIST",
+      241: "LET",
+      242: "PAUSE",
+      243: "NEXT",
+      244: "POKE",
+      245: "PRINT",
+      246: "PLOT",
+      247: "RUN",
+      248: "SAVE",
+      249: "RANDOMIZE",
+      250: "IF",
+      251: "CLS",
+      252: "DRAW",
+      253: "CLEAR",
+      254: "RETURN",
+      255: "COPY"
+    };
+    var NO_ARG_STATEMENTS = /* @__PURE__ */ new Set(["CLS", "STOP", "RETURN", "COPY", "CONTINUE", "NEW"]);
+    var NO_ARG_FUNCTIONS = /* @__PURE__ */ new Set(["RND", "PI", "INKEY$"]);
+    function parseTapBlocks(tapData) {
+      const bytes = tapData instanceof Uint8Array ? tapData : new Uint8Array(tapData);
+      const blocks = [];
+      let offset = 0;
+      while (offset + 2 <= bytes.length) {
+        const blockLen = bytes[offset] | bytes[offset + 1] << 8;
+        offset += 2;
+        if (blockLen <= 0 || offset + blockLen > bytes.length) {
+          break;
+        }
+        const flag = bytes[offset];
+        const payload = bytes.slice(offset + 1, offset + blockLen - 1);
+        const checksum = bytes[offset + blockLen - 1];
+        blocks.push({
+          flag,
+          payload,
+          checksum,
+          rawLength: blockLen
+        });
+        offset += blockLen;
+      }
+      return blocks;
+    }
+    function detokenizeLine(lineBytes) {
+      const bytes = lineBytes instanceof Uint8Array ? lineBytes : new Uint8Array(lineBytes);
+      const len = bytes.length;
+      let res = "";
+      let i = 0;
+      let inString = false;
+      let inRem = false;
+      while (i < len) {
+        const b = bytes[i];
+        if (b === 13) {
+          break;
+        }
+        if (b === 14 && i + 5 < len) {
+          const hasPrecedingDigits = /(?:\d|\.\d+)$/.test(res);
+          if (!hasPrecedingDigits) {
+            const numVal = decodeSinclairFloat(
+              bytes[i + 1],
+              bytes[i + 2],
+              bytes[i + 3],
+              bytes[i + 4],
+              bytes[i + 5]
+            );
+            res += String(numVal);
+          }
+          i += 6;
+          continue;
+        }
+        if (b === 34) {
+          if (!inRem) {
+            if (!inString) {
+              if (res.length > 0 && /[a-zA-Z0-9)]$/.test(res)) {
+                res += " ";
+              }
+              inString = true;
+              res += '"';
+              i++;
+              continue;
+            } else {
+              if (i + 1 < len && bytes[i + 1] === 34) {
+                res += '""';
+                i += 2;
+                continue;
+              }
+              inString = false;
+              res += '"';
+              i++;
+              continue;
+            }
+          }
+        }
+        if (inString) {
+          if (b === 16 && i + 1 < len) {
+            res += `{INK ${bytes[i + 1]}}`;
+            i += 2;
+            continue;
+          }
+          if (b === 17 && i + 1 < len) {
+            res += `{PAPER ${bytes[i + 1]}}`;
+            i += 2;
+            continue;
+          }
+          if (b === 18 && i + 1 < len) {
+            res += `{FLASH ${bytes[i + 1]}}`;
+            i += 2;
+            continue;
+          }
+          if (b === 19 && i + 1 < len) {
+            res += `{BRIGHT ${bytes[i + 1]}}`;
+            i += 2;
+            continue;
+          }
+          if (b === 20 && i + 1 < len) {
+            res += `{INVERSE ${bytes[i + 1]}}`;
+            i += 2;
+            continue;
+          }
+          if (b === 21 && i + 1 < len) {
+            res += `{OVER ${bytes[i + 1]}}`;
+            i += 2;
+            continue;
+          }
+          if (b === 22 && i + 2 < len) {
+            res += `{AT ${bytes[i + 1]},${bytes[i + 2]}}`;
+            i += 3;
+            continue;
+          }
+          if (b === 23 && i + 2 < len) {
+            const tabVal = bytes[i + 1] | bytes[i + 2] << 8;
+            res += `{TAB ${tabVal}}`;
+            i += 3;
+            continue;
+          }
+          if (b >= 144 && b <= 164) {
+            const udg = String.fromCharCode(65 + (b - 144));
+            res += `{${udg}}`;
+            i++;
+            continue;
+          }
+          if (b === 127) {
+            res += "{(c)}";
+            i++;
+            continue;
+          }
+          if (b === 96) {
+            res += "\xA3";
+            i++;
+            continue;
+          }
+          if (b >= 32 && b <= 126) {
+            res += String.fromCharCode(b);
+            i++;
+            continue;
+          }
+          res += `{CODE ${b}}`;
+          i++;
+          continue;
+        }
+        if (b === 234 && !inRem) {
+          inRem = true;
+          if (res.length > 0 && !res.endsWith(" ") && !res.endsWith(":")) {
+            res += " ";
+          }
+          res += "REM";
+          i++;
+          if (i < len && bytes[i] === 32) {
+            res += " ";
+            i++;
+          } else if (i < len && bytes[i] !== 13) {
+            res += " ";
+          }
+          continue;
+        }
+        if (inRem) {
+          if (b >= 32 && b <= 126) {
+            res += String.fromCharCode(b);
+          } else if (b >= 144 && b <= 164) {
+            res += `{${String.fromCharCode(65 + (b - 144))}}`;
+          } else if (b === 127) {
+            res += "{(c)}";
+          } else if (b >= 165 && b <= 255) {
+            res += TOKEN_TO_KEYWORD[b] || `{CODE ${b}}`;
+          } else {
+            res += `{CODE ${b}}`;
+          }
+          i++;
+          continue;
+        }
+        if (b >= 16 && b <= 21 && i + 1 < len) {
+          const kw = b === 16 ? "INK" : b === 17 ? "PAPER" : b === 18 ? "FLASH" : b === 19 ? "BRIGHT" : b === 20 ? "INVERSE" : "OVER";
+          const val = bytes[i + 1];
+          if (res.length > 0 && !res.endsWith(": ") && !res.endsWith(" ")) {
+            res += ": ";
+          }
+          res += `${kw} ${val}`;
+          i += 2;
+          const nextByte = i < len ? bytes[i] : 13;
+          if (nextByte !== 13 && nextByte !== 58) {
+            res += ": ";
+          }
+          continue;
+        }
+        if (b === 22 && i + 2 < len) {
+          const row = bytes[i + 1];
+          const col = bytes[i + 2];
+          if (res.length > 0 && !res.endsWith(": ") && !res.endsWith(" ")) {
+            res += ": ";
+          }
+          res += `PRINT AT ${row},${col};`;
+          i += 3;
+          const nextByte = i < len ? bytes[i] : 13;
+          if (nextByte !== 13 && nextByte !== 58) {
+            res += " ";
+          }
+          continue;
+        }
+        if (b === 23 && i + 2 < len) {
+          const tabVal = bytes[i + 1] | bytes[i + 2] << 8;
+          if (res.length > 0 && !res.endsWith(": ") && !res.endsWith(" ")) {
+            res += ": ";
+          }
+          res += `PRINT TAB ${tabVal};`;
+          i += 3;
+          const nextByte = i < len ? bytes[i] : 13;
+          if (nextByte !== 13 && nextByte !== 58) {
+            res += " ";
+          }
+          continue;
+        }
+        if (b === 58) {
+          res = res.trimEnd() + ": ";
+          i++;
+          while (i < len && bytes[i] === 32) {
+            i++;
+          }
+          continue;
+        }
+        if (b >= 165 && b <= 255) {
+          const kw = TOKEN_TO_KEYWORD[b];
+          if (kw) {
+            if (res.length > 0 && !res.endsWith(" ") && !res.endsWith(":") && !res.endsWith("(")) {
+              res += " ";
+            }
+            res += kw;
+            const nextByte = i + 1 < len ? bytes[i + 1] : 13;
+            if (kw === "AND" || kw === "OR") {
+              res += " ";
+            } else if (kw === "<=" || kw === ">=" || kw === "<>") {
+            } else if (NO_ARG_STATEMENTS.has(kw) || NO_ARG_FUNCTIONS.has(kw)) {
+            } else if (kw === "DEF FN") {
+              res += " ";
+            } else {
+              if (nextByte !== 13 && nextByte !== 58 && nextByte !== 32) {
+                if (nextByte === 40) {
+                } else {
+                  res += " ";
+                }
+              }
+            }
+            i++;
+            while (i < len && bytes[i] === 32) {
+              i++;
+            }
+            continue;
+          }
+        }
+        if (b === 32) {
+          if (!res.endsWith(" ")) {
+            res += " ";
+          }
+          i++;
+          continue;
+        }
+        if (b === 127) {
+          res += "{(c)}";
+          i++;
+          continue;
+        }
+        if (b === 96) {
+          res += "\xA3";
+          i++;
+          continue;
+        }
+        if (b >= 32 && b <= 126) {
+          res += String.fromCharCode(b);
+          i++;
+          continue;
+        }
+        if (b >= 144 && b <= 164) {
+          res += `{${String.fromCharCode(65 + (b - 144))}}`;
+          i++;
+          continue;
+        }
+        res += `{CODE ${b}}`;
+        i++;
+      }
+      return res.trimEnd();
+    }
+    function decodeBasicProgram(payload, varOffset = 0) {
+      const bytes = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+      const maxLen = varOffset > 0 && varOffset <= bytes.length ? varOffset : bytes.length;
+      const lines = [];
+      let offset = 0;
+      while (offset + 4 <= maxLen) {
+        const lineNum = bytes[offset] << 8 | bytes[offset + 1];
+        const lineLen = bytes[offset + 2] | bytes[offset + 3] << 8;
+        offset += 4;
+        if (lineNum > 9999 || lineLen <= 0 || offset + lineLen > bytes.length) {
+          break;
+        }
+        const lineBytes = bytes.slice(offset, offset + lineLen);
+        offset += lineLen;
+        const text = detokenizeLine(lineBytes);
+        lines.push({
+          lineNum,
+          text,
+          fullLine: `${lineNum} ${text}`
+        });
+      }
+      const basText = lines.map((l) => l.fullLine).join("\n") + (lines.length > 0 ? "\n" : "");
+      return { lines, basText };
+    }
+    function extractProgramsFromTap2(tapBuffer) {
+      const blocks = parseTapBlocks(tapBuffer);
+      const programs = [];
+      for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        if (b.flag === 0 && b.payload.length >= 17 && b.payload[0] === 0) {
+          let name = "";
+          for (let c = 1; c <= 10; c++) {
+            name += String.fromCharCode(b.payload[c]);
+          }
+          name = name.trim() || "program";
+          const autostart = b.payload[13] | b.payload[14] << 8;
+          const varOffset = b.payload[15] | b.payload[16] << 8;
+          let dataBlock = null;
+          if (i + 1 < blocks.length && blocks[i + 1].flag === 255) {
+            dataBlock = blocks[i + 1];
+            i++;
+          }
+          if (dataBlock) {
+            const decoded = decodeBasicProgram(dataBlock.payload, varOffset);
+            if (decoded.lines.length > 0) {
+              const jbasText = basToJBas2(decoded.basText);
+              programs.push({
+                name,
+                autostart: autostart < 32768 ? autostart : 0,
+                varOffset,
+                basText: decoded.basText,
+                jbasText,
+                linesCount: decoded.lines.length
+              });
+            }
+          }
+        }
+      }
+      if (programs.length === 0) {
+        for (const b of blocks) {
+          if (b.flag === 255 && b.payload.length > 4) {
+            const decoded = decodeBasicProgram(b.payload);
+            if (decoded.lines.length > 0) {
+              const jbasText = basToJBas2(decoded.basText);
+              programs.push({
+                name: "program",
+                autostart: 0,
+                varOffset: 0,
+                basText: decoded.basText,
+                jbasText,
+                linesCount: decoded.lines.length
+              });
+              break;
+            }
+          }
+        }
+      }
+      return programs;
+    }
+    function tapToBas2(tapBuffer) {
+      const programs = extractProgramsFromTap2(tapBuffer);
+      return programs.length > 0 ? programs[0] : null;
+    }
+    module2.exports = {
+      TOKEN_TO_KEYWORD,
+      parseTapBlocks,
+      detokenizeLine,
+      decodeBasicProgram,
+      extractProgramsFromTap: extractProgramsFromTap2,
+      tapToBas: tapToBas2,
+      tapToJBas: (tapBuffer) => {
+        const res = tapToBas2(tapBuffer);
+        return res ? res.jbasText : null;
+      }
+    };
+  }
+});
+
 // src/webExtension.js
 var vscode = require("vscode");
 var { renumberProgram } = require_renumber();
@@ -4196,6 +4914,8 @@ var {
   mapBasicToSourceLine
 } = require_debugger();
 var { getTurbo80Html } = require_turbo80Html();
+var { extractProgramsFromTap, tapToBas, tapToJBas } = require_tapDecoder();
+var { basToJBas } = require_bas2jbas();
 function getBaseName(uri, extToRemove = "") {
   const segments = uri.path.split("/");
   const last = segments[segments.length - 1] || "program";
@@ -4849,6 +5569,78 @@ ${shareUrl}`,
       vscode.window.showErrorMessage(`Error al compartir en Turbo80: ${err.message}`);
     }
   }
+  async function handleImportTap(uri, format = "both") {
+    let tapUri = uri;
+    if (!tapUri || !tapUri.path || !tapUri.path.toLowerCase().endsWith(".tap")) {
+      let defaultUri;
+      if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        defaultUri = vscode.workspace.workspaceFolders[0].uri;
+      }
+      const fileUris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        defaultUri,
+        openLabel: "Import Sinclair BASIC from TAP",
+        filters: { "ZX Spectrum TAP files (*.tap)": ["tap"], "All Files (*.*)": ["*"] }
+      });
+      if (fileUris && fileUris[0]) {
+        tapUri = fileUris[0];
+      }
+    }
+    if (!tapUri) return;
+    try {
+      const tapBytes = await vscode.workspace.fs.readFile(tapUri);
+      const programs = extractProgramsFromTap(tapBytes);
+      if (!programs || programs.length === 0) {
+        vscode.window.showErrorMessage(
+          `No Sinclair BASIC program found in '${getBaseName(tapUri)}'. (The tape may only contain machine code or screen blocks).`
+        );
+        return;
+      }
+      let targetDir = vscode.Uri.joinPath(tapUri, "..");
+      if (getBaseName(targetDir).toLowerCase() === "dist") {
+        targetDir = vscode.Uri.joinPath(targetDir, "..");
+      }
+      const tapBase = getBaseName(tapUri, ".tap");
+      let createdBasUri = null;
+      let createdJbasUri = null;
+      for (let pIdx = 0; pIdx < programs.length; pIdx++) {
+        const prog = programs[pIdx];
+        const prefix = programs.length === 1 ? tapBase : `${tapBase}_${prog.name}`;
+        const basUri = vscode.Uri.joinPath(targetDir, `${prefix}.bas`);
+        const jbasUri = vscode.Uri.joinPath(targetDir, `${prefix}.jbas`);
+        if (format === "both" || format === "bas") {
+          await vscode.workspace.fs.writeFile(basUri, new TextEncoder().encode(prog.basText));
+          createdBasUri = basUri;
+        }
+        if (format === "both" || format === "jbas") {
+          await vscode.workspace.fs.writeFile(jbasUri, new TextEncoder().encode(prog.jbasText));
+          createdJbasUri = jbasUri;
+        }
+      }
+      const primaryUri = createdJbasUri || createdBasUri;
+      if (primaryUri) {
+        const doc = await vscode.workspace.openTextDocument(primaryUri);
+        await vscode.window.showTextDocument(doc);
+      }
+      const prog0 = programs[0];
+      const items = [];
+      if (createdJbasUri) items.push("Open .jbas");
+      if (createdBasUri) items.push("Open .bas");
+      const msg = format === "bas" ? `Sinclair BASIC imported from ${getBaseName(tapUri)} (${prog0.linesCount} lines): created ${getBaseName(createdBasUri)}` : format === "jbas" ? `Sinclair BASIC imported from ${getBaseName(tapUri)} (${prog0.linesCount} lines): created ${getBaseName(createdJbasUri)}` : `Sinclair BASIC imported from ${getBaseName(tapUri)} (${prog0.linesCount} lines): created ${getBaseName(createdBasUri)} and ${getBaseName(createdJbasUri)}`;
+      const choice = await vscode.window.showInformationMessage(msg, ...items);
+      if (choice === "Open .jbas" && createdJbasUri) {
+        const doc = await vscode.workspace.openTextDocument(createdJbasUri);
+        await vscode.window.showTextDocument(doc);
+      } else if (choice === "Open .bas" && createdBasUri) {
+        const doc = await vscode.workspace.openTextDocument(createdBasUri);
+        await vscode.window.showTextDocument(doc);
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Error importing Sinclair BASIC from TAP: ${err.message}`);
+    }
+  }
   const jbasLanguageConfig = vscode.languages.setLanguageConfiguration("jbas", {
     onEnterRules: [
       {
@@ -5142,6 +5934,10 @@ ${shareUrl}`,
     vscode.commands.registerCommand("sinclairBasic.runTurbo80", handleRunTurbo80),
     vscode.commands.registerCommand("sinclairBasic.runExternalEmulator", handleRunExternalEmulator),
     vscode.commands.registerCommand("sinclairBasic.shareTurbo80", handleShareTurbo80),
+    // Import from TAP (.bas and .jbas)
+    vscode.commands.registerCommand("sinclairBasic.importTap", (uri) => handleImportTap(uri, "both")),
+    vscode.commands.registerCommand("sinclairBasic.importTapToBas", (uri) => handleImportTap(uri, "bas")),
+    vscode.commands.registerCommand("sinclairBasic.importTapToJBas", (uri) => handleImportTap(uri, "jbas")),
     // Debugger commands for Sinclair BASIC (48K step-by-step & variables)
     vscode.commands.registerCommand("sinclairBasic.debugTurbo80", handleDebugTurbo80),
     vscode.commands.registerCommand("sinclairBasic.debugContinue", handleDebugContinue),

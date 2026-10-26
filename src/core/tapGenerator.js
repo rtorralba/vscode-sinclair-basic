@@ -254,6 +254,44 @@ function tokenizeLine(line) {
       continue;
     }
 
+    // Control codes or UDG outside quotes in {...} format
+    if (line[i] === '{') {
+      const closeIdx = line.indexOf('}', i + 1);
+      if (closeIdx !== -1) {
+        const content = line.slice(i + 1, closeIdx).trim();
+        const upper = content.toUpperCase();
+
+        let m = upper.match(/^CODE\s+(\d+)$/);
+        if (m) {
+          res.push(parseInt(m[1], 10) & 0xFF);
+          i = closeIdx + 1;
+          continue;
+        }
+        m = upper.match(/^#([0-9A-F]{1,2})$/);
+        if (m) {
+          res.push(parseInt(m[1], 16) & 0xFF);
+          i = closeIdx + 1;
+          continue;
+        }
+        m = upper.match(/^\\X([0-9A-F]{1,2})$/);
+        if (m) {
+          res.push(parseInt(m[1], 16) & 0xFF);
+          i = closeIdx + 1;
+          continue;
+        }
+        if (content.length === 1 && upper >= 'A' && upper <= 'U') {
+          res.push(144 + upper.charCodeAt(0) - 65);
+          i = closeIdx + 1;
+          continue;
+        }
+        if (content === '(c)' || content === '(C)') {
+          res.push(0x7F);
+          i = closeIdx + 1;
+          continue;
+        }
+      }
+    }
+
     const sub = line.substr(i);
     // Match integer or floating point number
     const matchNum = sub.match(/^(\d+(?:\.\d+)?|\.\d+)/);

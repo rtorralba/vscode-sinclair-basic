@@ -23,6 +23,8 @@ const {
   mapBasicToSourceLine
 } = require('./core/debugger');
 const { getTurbo80Html } = require('./core/turbo80Html');
+const { extractProgramsFromTap, tapToBas, tapToJBas } = require('./core/tapDecoder');
+const { basToJBas } = require('./core/bas2jbas');
 
 /**
  * Returns the basename of a Uri, optionally stripping an extension.
@@ -826,6 +828,98 @@ function activate(context) {
     }
   }
 
+  // Command: Import .bas and/or .jbas from TAP file
+  async function handleImportTap(uri, format = 'both') {
+    let tapUri = uri;
+
+    if (!tapUri || !tapUri.path || !tapUri.path.toLowerCase().endsWith('.tap')) {
+      let defaultUri;
+      if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        defaultUri = vscode.workspace.workspaceFolders[0].uri;
+      }
+      const fileUris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        defaultUri,
+        openLabel: 'Import Sinclair BASIC from TAP',
+        filters: { 'ZX Spectrum TAP files (*.tap)': ['tap'], 'All Files (*.*)': ['*'] }
+      });
+      if (fileUris && fileUris[0]) {
+        tapUri = fileUris[0];
+      }
+    }
+
+    if (!tapUri) return;
+
+    try {
+      const tapBytes = await vscode.workspace.fs.readFile(tapUri);
+      const programs = extractProgramsFromTap(tapBytes);
+
+      if (!programs || programs.length === 0) {
+        vscode.window.showErrorMessage(
+          `No Sinclair BASIC program found in '${getBaseName(tapUri)}'. (The tape may only contain machine code or screen blocks).`
+        );
+        return;
+      }
+
+      // Determine output directory: if tap is inside dist/, save to parent directory (project root)
+      let targetDir = vscode.Uri.joinPath(tapUri, '..');
+      if (getBaseName(targetDir).toLowerCase() === 'dist') {
+        targetDir = vscode.Uri.joinPath(targetDir, '..');
+      }
+
+      const tapBase = getBaseName(tapUri, '.tap');
+      let createdBasUri = null;
+      let createdJbasUri = null;
+
+      for (let pIdx = 0; pIdx < programs.length; pIdx++) {
+        const prog = programs[pIdx];
+        const prefix = programs.length === 1 ? tapBase : `${tapBase}_${prog.name}`;
+        const basUri = vscode.Uri.joinPath(targetDir, `${prefix}.bas`);
+        const jbasUri = vscode.Uri.joinPath(targetDir, `${prefix}.jbas`);
+
+        if (format === 'both' || format === 'bas') {
+          await vscode.workspace.fs.writeFile(basUri, new TextEncoder().encode(prog.basText));
+          createdBasUri = basUri;
+        }
+
+        if (format === 'both' || format === 'jbas') {
+          await vscode.workspace.fs.writeFile(jbasUri, new TextEncoder().encode(prog.jbasText));
+          createdJbasUri = jbasUri;
+        }
+      }
+
+      const primaryUri = createdJbasUri || createdBasUri;
+      if (primaryUri) {
+        const doc = await vscode.workspace.openTextDocument(primaryUri);
+        await vscode.window.showTextDocument(doc);
+      }
+
+      const prog0 = programs[0];
+      const items = [];
+      if (createdJbasUri) items.push('Open .jbas');
+      if (createdBasUri) items.push('Open .bas');
+
+      const msg = (format === 'bas')
+        ? `Sinclair BASIC imported from ${getBaseName(tapUri)} (${prog0.linesCount} lines): created ${getBaseName(createdBasUri)}`
+        : (format === 'jbas')
+        ? `Sinclair BASIC imported from ${getBaseName(tapUri)} (${prog0.linesCount} lines): created ${getBaseName(createdJbasUri)}`
+        : `Sinclair BASIC imported from ${getBaseName(tapUri)} (${prog0.linesCount} lines): created ${getBaseName(createdBasUri)} and ${getBaseName(createdJbasUri)}`;
+
+      const choice = await vscode.window.showInformationMessage(msg, ...items);
+      if (choice === 'Open .jbas' && createdJbasUri) {
+        const doc = await vscode.workspace.openTextDocument(createdJbasUri);
+        await vscode.window.showTextDocument(doc);
+      } else if (choice === 'Open .bas' && createdBasUri) {
+        const doc = await vscode.workspace.openTextDocument(createdBasUri);
+        await vscode.window.showTextDocument(doc);
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Error importing Sinclair BASIC from TAP: ${err.message}`);
+    }
+  }
+
   // Language configuration (auto-indent)
   const jbasLanguageConfig = vscode.languages.setLanguageConfiguration('jbas', {
     onEnterRules: [
@@ -1158,6 +1252,11 @@ function activate(context) {
     vscode.commands.registerCommand('sinclairBasic.runTurbo80', handleRunTurbo80),
     vscode.commands.registerCommand('sinclairBasic.runExternalEmulator', handleRunExternalEmulator),
     vscode.commands.registerCommand('sinclairBasic.shareTurbo80', handleShareTurbo80),
+
+    // Import from TAP (.bas and .jbas)
+    vscode.commands.registerCommand('sinclairBasic.importTap', (uri) => handleImportTap(uri, 'both')),
+    vscode.commands.registerCommand('sinclairBasic.importTapToBas', (uri) => handleImportTap(uri, 'bas')),
+    vscode.commands.registerCommand('sinclairBasic.importTapToJBas', (uri) => handleImportTap(uri, 'jbas')),
 
     // Debugger commands for Sinclair BASIC (48K step-by-step & variables)
     vscode.commands.registerCommand('sinclairBasic.debugTurbo80', handleDebugTurbo80),
