@@ -36,7 +36,7 @@
   "main": "./src/extension.js",
   "browser": "./dist/webExtension.js",
   "scripts": {
-    "build-web": "esbuild ./src/webExtension.js --bundle --format=cjs --platform=browser --external:vscode --external:fs --external:path --outfile=dist/webExtension.js",
+    "build-web": "esbuild ./src/webExtension.js --bundle --format=cjs --platform=browser --external:vscode --external:fs --external:path --external:child_process --outfile=dist/webExtension.js",
     "vscode:prepublish": "npm run build-web",
     "test": "node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js",
     "package": "npm run build-web && vsce package",
@@ -266,6 +266,12 @@
         "title": "Debug: Inspect Variables",
         "category": "Sinclair BASIC",
         "icon": "$(list-unordered)"
+      },
+      {
+        "command": "sinclairBasic.toggleRetroMode",
+        "title": "Toggle Retro Mode (Spectrum 48K)",
+        "category": "Sinclair BASIC",
+        "icon": "$(sparkle)"
       }
     ],
     "menus": {
@@ -304,6 +310,11 @@
           "command": "sinclairBasic.shareTurbo80",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "navigation@5"
+        },
+        {
+          "command": "sinclairBasic.toggleRetroMode",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "navigation@6"
         }
       ],
       "editor/context": [
@@ -576,6 +587,36 @@
           "default": true,
           "description": "Automatically optimize constant PRINT attribute modifiers (AT, PAPER, INK, FLASH, BRIGHT, etc.) into control code strings for maximum speed and memory savings on ZX Spectrum.",
           "order": 12
+        },
+        "sinclairBasic.retroMode.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable authentic ZX Spectrum Retro Mode (authentic 48K beep and auto-formatting on Enter).",
+          "order": 13
+        },
+        "sinclairBasic.retroMode.beepOnEnter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Emit authentic ZX Spectrum confirmation keyclick when pressing Enter on a valid line.",
+          "order": 14
+        },
+        "sinclairBasic.retroMode.beepOnError": {
+          "type": "boolean",
+          "default": true,
+          "description": "Emit authentic ZX Spectrum +3 / 128K RASP error buzz when pressing Enter on a line with syntax error.",
+          "order": 15
+        },
+        "sinclairBasic.retroMode.beepOnCursor": {
+          "type": "boolean",
+          "default": true,
+          "description": "Emit authentic ZX Spectrum +3 / 128K keyclick tick when moving the cursor with arrow keys.",
+          "order": 16
+        },
+        "sinclairBasic.retroMode.formatOnEnter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically format keywords to UPPERCASE when pressing Enter on a valid line.",
+          "order": 17
         }
       }
     }

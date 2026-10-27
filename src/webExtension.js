@@ -25,6 +25,9 @@ const {
 const { getTurbo80Html } = require('./core/turbo80Html');
 const { extractProgramsFromTap, tapToBas, tapToJBas } = require('./core/tapDecoder');
 const { basToJBas } = require('./core/bas2jbas');
+const { RetroModeController } = require('./core/retroMode');
+
+let retroModeController = null;
 
 /**
  * Returns the basename of a Uri, optionally stripping an extension.
@@ -1369,10 +1372,20 @@ function activate(context) {
     vscode.workspace.onDidCloseTextDocument(doc => jbasDiagnostics.delete(doc.uri))
   );
 
+  // Initialize Sinclair BASIC Retro Mode (ZX Spectrum 48K)
+  retroModeController = new RetroModeController(vscode, context);
+  retroModeController.init();
+  context.subscriptions.push(retroModeController);
+
   vscode.workspace.textDocuments.forEach(validateJBasDocument);
 }
 
-function deactivate() {}
+function deactivate() {
+  if (retroModeController) {
+    retroModeController.dispose();
+    retroModeController = null;
+  }
+}
 
 module.exports = {
   activate,

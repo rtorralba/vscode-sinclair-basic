@@ -66,8 +66,13 @@ vscode-sinclair-basic/
 |       |-- keywords.js                  # Core metadata: Sinclair BASIC keyword definitions, docs & snippets
 |       |-- formatter.js                 # Core engine: Uppercase keyword formatter with string & comment protection
 |       |-- completions.js               # Autocompletion provider logic for Sinclair BASIC & JBAS
+|       |-- retroMode.js                 # Core engine: ZX Spectrum 48K retro mode (keyclick beep, auto-format, editor Paper 7 & 8x8 font)
 |       |-- debugger.js                  # Core engine: ZX Spectrum 48K statement dispatcher (0x1B3D) & RAM variable decoder
 |       +-- turbo80Html.js               # Shared Webview HTML template with integrated Turbo80 runtime & debug UI
+|-- media/
+|   |-- fonts/
+|   |   +-- ZXSpectrum.ttf               # Authentic ZX Spectrum 48K TrueType pixel font
+|   +-- turbo80/                         # Offline Turbo80 emulator files
 |-- dist/
 |   +-- webExtension.js                  # Bundled single-file web extension (built via esbuild)
 |-- test/
@@ -83,6 +88,7 @@ vscode-sinclair-basic/
 |   |-- definitions.test.js              # Unit tests for .bas jump target Go to Definition provider
 |   |-- share.test.js                    # Unit tests for Turbo80 share engine
 |   |-- formatter.test.js                # Unit tests for uppercase keyword formatter
+|   |-- retroMode.test.js                # Unit tests for retro mode cursor detector and sound beeper
 |   |-- completions.test.js              # Unit tests for autocompletion provider
 |   +-- debugger.test.js                 # Unit tests for Sinclair BASIC debugger engine
 |-- AGENTS.md                            # Complete AI instructions (this file)
@@ -150,8 +156,22 @@ vscode-sinclair-basic/
    - `sinclairBasic.importTap` / `sinclairBasic.importTapToBas` / `sinclairBasic.importTapToJBas`: Decodifica archivos de cinta `.tap` extrayendo el programa Sinclair BASIC en versión estándar `.bas` y en versión moderna `.jbas` (con etiquetas `@label:`, comentarios `'`, sin números de línea y con indentación). Permite importar directamente desde el menú contextual del explorador en cualquier archivo `.tap` o desde la paleta de comandos con selector de archivos.
    - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
 
-6. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 117 passing tests.
+6. **ZX Spectrum +3 BASIC Retro Mode (`src/core/retroMode.js`)**:
+   - `sinclairBasic.toggleRetroMode`: Conmutador simple (switch ON/OFF) sin temas intrusivos ni popups molestos.
+   - **Pantalla blanca Paper 7 aplicada ÚNICAMENTE al lienzo del editor**: Vía `workbench.colorCustomizations`, convierte el fondo del editor en Paper 7 (`#FFFFFF`) y tinta en Ink 0 (`#000000`), manteniendo intacta la interfaz oscura del resto de VS Code. Con resaltados de selección en cian retro suave para máxima legibilidad.
+   - **Tipografía auténtica ZX Spectrum 8x8 ampliada y en negrita (Bold)**: Aplica la fuente oficial `ZX Spectrum Unicode` a 19px en negrita (`bold`) exclusivamente en ficheros `.bas` y `.jbas`.
+   - **Sin distracciones**: Oculta automáticamente los números de línea del editor (en Sinclair BASIC las líneas ya están numeradas en el propio código), oculta el minimapa y pliega el panel inferior para emular la pantalla completa del ZX Spectrum.
+   - **Restauración 100% al desactivar**: Al desactivar el modo retro, restaura de inmediato los números de línea, el minimapa, la fuente normal y los colores habituales del usuario.
+   - **Sistema de audio 1:1 del editor +3 BASIC a latencia cero**:
+     - **Enter válido**: Al pulsar `Enter`, si la línea no contiene errores de sintaxis, reproduce el tono de confirmación positivo auténtico de 105 ms (`media/sound/zx_click.wav`) y auto-formatea las palabras clave a MAYÚSCULAS protegiendo cadenas y comentarios.
+     - **Enter con error**: Si la línea tiene un error de sintaxis (comillas abiertas, falta número de línea en `.bas`, sintaxis inválida, etc.), reproduce el zumbido de advertencia auténtico RASP de 255 ms (`media/sound/zx_error.wav`).
+     - **Movimiento de cursor**: Al navegar con las flechas o cambiar de selección, emite el clic auténtico de teclado de 22 ms (`media/sound/zx_cursor.wav`), con estrangulamiento (throttle) a 55 ms emulando la tasa de repetición real del Spectrum sin saturar.
+     - **Reproductor persistente en memoria**: Emplea instancias pre-cargadas de `System.Media.SoundPlayer` (`$click`, `$err`, `$cursor`) en un único proceso PowerShell en segundo plano en Windows (y `afplay`/`paplay` en macOS/Linux), garantizando latencia 0 ms.
+     - **Ajustes configurables en `package.json`**: `sinclairBasic.retroMode.beepOnEnter`, `sinclairBasic.retroMode.beepOnError`, `sinclairBasic.retroMode.beepOnCursor` y `sinclairBasic.retroMode.formatOnEnter`.
+   - **Cursor 100% normal**: Sin decoraciones ni artefactos artificiales de bloque sobre el cursor del editor.
+
+7. **Automated Tests**:
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 128 passing tests.
 
 ---
 

@@ -131,6 +131,17 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
 * **Full Encoding & Control Code Fidelity**: Automatically detokenizes Sinclair BASIC tokens, decodes hidden floating-point numbers (including protected loader lines), UDGs (`{A}`..`{U}`), control codes (`{PAPER n}`, `{INK n}`, `{AT row, col}`, `{TAB x}`, `{CODE n}`), and special characters (`{(c)}`, `£`).
 * **Instant Editor Opening**: Opens the extracted code directly in the VS Code editor with full syntax highlighting, navigation, and debugging support.
 
+### 10. Authentic ZX Spectrum +3 BASIC Retro Mode
+* **One-Click Retro Mode Toggle**: Click the `$(sparkle) ZX Retro: ON/OFF` status bar item or run `Sinclair BASIC: Toggle Retro Mode`.
+* **Authentic +3 BASIC 3-Sound Audio Engine**:
+  * **Line Confirmation Tone on Enter** (`media/sound/zx_click.wav`): When you submit a syntactically valid line of BASIC, emits the authentic positive line acceptance tone (105 ms) and automatically formats keywords to UPPERCASE.
+  * **Syntax Error Buzz on Enter** (`media/sound/zx_error.wav`): If the line has a syntax error (e.g. unclosed quotes, invalid statements, missing line numbers in `.bas`), emits the authentic ZX Spectrum warning/error rasp buzz (255 ms).
+  * **Cursor Navigation Click** (`media/sound/zx_cursor.wav`): Emits the subtle mechanical keyboard tick (22 ms) when navigating lines or moving the cursor with arrow keys (throttled to 55 ms to match genuine key-repeat cadence).
+  * **Zero Latency**: Sounds are pre-loaded in memory via a persistent background audio engine.
+* **Auto-Uppercase Formatting on Enter**: When you press `Enter` on a valid line, all Sinclair BASIC keywords are instantly formatted to **UPPERCASE** (`print "hello" -> PRINT "hello"`), strictly preserving string literals (`"..."`) and comments (`REM`, `'`).
+* **Clean Retro Display (Zero Distractions)**: Automatically applies white Paper 7 background strictly to the editor, sets authentic bold 8x8 ZX Spectrum font, closes the bottom panel, and hides the minimap and line numbers margin for true ZX Spectrum immersion.
+* **100% Reversible Switch**: Toggling off instantly restores the user's normal colors, theme, font, minimap, and line numbers.
+
 ---
 
 ## Commands & Shortcuts
@@ -152,6 +163,7 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shif
 | **Run in Emulator** | `sinclairBasic.runEmulator` | `Ctrl+F5` | Compiles to TAP and launches the configured emulator (built-in Turbo80 Webview or external Fuse). |
 | **Run in Web Emulator (Turbo80)** | `sinclairBasic.runTurbo80` | — | Forces execution in the built-in Turbo80 web emulator tab. |
 | **Run in External Emulator** | `sinclairBasic.runExternalEmulator` | — | Forces execution in the configured external desktop emulator. |
+| **Toggle Retro Mode** | `sinclairBasic.toggleRetroMode` | — | Toggles authentic +3 BASIC retro mode (paper 7 white canvas, ZX 8x8 font, line audio feedback). |
 
 ---
 
@@ -162,6 +174,11 @@ You can customize the extension via VS Code Settings (`settings.json`):
 
 ```json
 {
+  "sinclairBasic.retroMode.enabled": false,
+  "sinclairBasic.retroMode.beepOnEnter": true,
+  "sinclairBasic.retroMode.beepOnError": true,
+  "sinclairBasic.retroMode.beepOnCursor": true,
+  "sinclairBasic.retroMode.formatOnEnter": true,
   "sinclairBasic.emulatorType": "turbo80",
   "sinclairBasic.turbo80Model": "48k",
   "sinclairBasic.turbo80Crt": true,
@@ -175,6 +192,9 @@ You can customize the extension via VS Code Settings (`settings.json`):
 }
 ```
 
+* `sinclairBasic.retroMode.enabled`: Enables authentic ZX Spectrum retro experience with keyclick sound on Enter and auto-formatting.
+* `sinclairBasic.retroMode.beepOnEnter`: Emits authentic Sinclair ZX Spectrum 48K ROM keyclick tone (~987 Hz square wave) upon pressing Enter.
+* `sinclairBasic.retroMode.formatOnEnter`: Automatically formats Sinclair BASIC keywords to UPPERCASE upon pressing Enter on a line.
 * `sinclairBasic.optimizePrintAttributes`: Enabled by default (`true`). Automatically folds constant `PRINT` attributes (`AT`, `PAPER`, `INK`, `FLASH`, `BRIGHT`, etc.) into compact control code strings for peak ZX Spectrum execution speed while letting developers write standard, natural Sinclair BASIC in `.jbas`.
 * `sinclairBasic.emulatorType`: Set to `"turbo80"` (default, opens embedded web emulator) or `"external"` (launches Fuse or desktop emulator).
 * `sinclairBasic.turbo80Model`: Emulated ZX Spectrum machine (`48k`, `128k`, `plus2`, `plus2a`, `plus3`, `16k`).

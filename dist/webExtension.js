@@ -4893,6 +4893,687 @@ var require_tapDecoder = __commonJS({
   }
 });
 
+// src/core/retroMode.js
+var require_retroMode = __commonJS({
+  "src/core/retroMode.js"(exports2, module2) {
+    var path = require("path");
+    var fs = require("fs");
+    var spawn = null;
+    var execFileSync = null;
+    try {
+      const cp = require("child_process");
+      spawn = cp.spawn;
+      execFileSync = cp.execFileSync;
+    } catch {
+    }
+    var { formatLineKeywords } = require_formatter();
+    function ensureFontInstalled(extensionPath) {
+      if (process.platform !== "win32" || !execFileSync || !extensionPath) return;
+      try {
+        const fontSrc = path.join(extensionPath, "media", "fonts", "ZXSpectrum.ttf");
+        const localAppData = process.env.LOCALAPPDATA;
+        if (!localAppData || !fs.existsSync(fontSrc)) return;
+        const fontDir = path.join(localAppData, "Microsoft", "Windows", "Fonts");
+        const fontDest = path.join(fontDir, "ZXSpectrum.ttf");
+        if (!fs.existsSync(fontDir)) {
+          fs.mkdirSync(fontDir, { recursive: true });
+        }
+        if (!fs.existsSync(fontDest)) {
+          fs.copyFileSync(fontSrc, fontDest);
+        }
+        execFileSync("reg.exe", [
+          "add",
+          "HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
+          "/v",
+          "ZX Spectrum Unicode (TrueType)",
+          "/t",
+          "REG_SZ",
+          "/d",
+          fontDest,
+          "/f"
+        ], { stdio: "ignore" });
+      } catch {
+      }
+    }
+    function detectCursorMode(lineText, columnIndex, isJBas = false) {
+      if (!lineText || columnIndex <= 0) {
+        return "K";
+      }
+      const prefix = lineText.slice(0, columnIndex);
+      let insideString = false;
+      let lastStatementStart = 0;
+      for (let i = 0; i < prefix.length; i++) {
+        const ch = prefix[i];
+        if (ch === '"') {
+          insideString = !insideString;
+        } else if (!insideString && ch === ":") {
+          lastStatementStart = i + 1;
+        }
+      }
+      if (insideString) {
+        return "L";
+      }
+      const stmt = prefix.slice(lastStatementStart);
+      let stmtContent = stmt;
+      if (lastStatementStart === 0) {
+        stmtContent = stmtContent.replace(/^\s*\d+\s*/, "");
+        if (isJBas) {
+          stmtContent = stmtContent.replace(/^\s*@[a-zA-Z0-9_]+:\s*/, "");
+        }
+      }
+      stmtContent = stmtContent.trimStart();
+      return stmtContent.length === 0 ? "K" : "L";
+    }
+    var BASIC_STATEMENTS = /* @__PURE__ */ new Set([
+      "PRINT",
+      "LET",
+      "IF",
+      "FOR",
+      "NEXT",
+      "GO TO",
+      "GOTO",
+      "GO SUB",
+      "GOSUB",
+      "RETURN",
+      "PAUSE",
+      "BORDER",
+      "PAPER",
+      "INK",
+      "FLASH",
+      "BRIGHT",
+      "INVERSE",
+      "OVER",
+      "CLS",
+      "PLOT",
+      "DRAW",
+      "CIRCLE",
+      "BEEP",
+      "READ",
+      "DATA",
+      "RESTORE",
+      "DIM",
+      "REM",
+      "RANDOMIZE",
+      "CLEAR",
+      "CONTINUE",
+      "STOP",
+      "NEW",
+      "LOAD",
+      "SAVE",
+      "VERIFY",
+      "MERGE",
+      "INPUT",
+      "POKE",
+      "OUT",
+      "OPEN #",
+      "CLOSE #",
+      "CAT",
+      "FORMAT",
+      "MOVE",
+      "ERASE",
+      "LLIST",
+      "LPRINT",
+      "COPY",
+      "DEF FN",
+      "RUN",
+      "LINE"
+    ]);
+    function validateBasicLine(lineText, isJBas = false) {
+      if (!lineText || lineText.trim().length === 0) {
+        return { valid: true };
+      }
+      const trimmed = lineText.trim();
+      let content = trimmed;
+      if (!isJBas) {
+        const lineNumMatch = content.match(/^(\d+)\s*(.*)$/);
+        if (!lineNumMatch) {
+          return { valid: false, reason: "Missing line number" };
+        }
+        const lineNum = parseInt(lineNumMatch[1], 10);
+        if (lineNum < 1 || lineNum > 9999) {
+          return { valid: false, reason: "Line number out of range (1-9999)" };
+        }
+        content = lineNumMatch[2].trim();
+        if (content.length === 0) {
+          return { valid: true };
+        }
+      } else {
+        const labelMatch = content.match(/^@([a-zA-Z0-9_]+):\s*(.*)$/);
+        if (labelMatch) {
+          content = labelMatch[2].trim();
+          if (content.length === 0) {
+            return { valid: true };
+          }
+        }
+      }
+      const upperTrimmed = content.toUpperCase();
+      if (upperTrimmed.startsWith("REM") || isJBas && content.startsWith("'")) {
+        return { valid: true };
+      }
+      let insideString = false;
+      let parenDepth = 0;
+      const statements = [];
+      let currentStmt = "";
+      for (let i = 0; i < content.length; i++) {
+        const ch = content[i];
+        if (ch === '"') {
+          insideString = !insideString;
+          currentStmt += ch;
+          continue;
+        }
+        if (insideString) {
+          currentStmt += ch;
+          continue;
+        }
+        if (isJBas && ch === "'") {
+          break;
+        }
+        const remaining = content.slice(i);
+        if (/^REM(\s|$)/i.test(remaining)) {
+          currentStmt += remaining;
+          break;
+        }
+        if (ch === "(") {
+          parenDepth++;
+        } else if (ch === ")") {
+          parenDepth--;
+          if (parenDepth < 0) {
+            return { valid: false, reason: "Unmatched closing parenthesis" };
+          }
+        }
+        if (ch === ":") {
+          statements.push(currentStmt);
+          currentStmt = "";
+        } else {
+          currentStmt += ch;
+        }
+      }
+      if (insideString) {
+        return { valid: false, reason: "Unclosed string literal" };
+      }
+      if (parenDepth !== 0) {
+        return { valid: false, reason: "Unbalanced parentheses" };
+      }
+      statements.push(currentStmt);
+      for (let s = 0; s < statements.length; s++) {
+        const stmt = statements[s].trim();
+        if (stmt.length === 0) {
+          return { valid: false, reason: "Empty statement" };
+        }
+        const stmtUpper = stmt.toUpperCase();
+        if (stmtUpper.startsWith("REM") || isJBas && stmt.startsWith("'")) {
+          break;
+        }
+        let sContent = stmt;
+        if (isJBas) {
+          sContent = sContent.replace(/^@[a-zA-Z0-9_]+:\s*/, "").trim();
+          if (sContent.length === 0) continue;
+        }
+        const sUpper = sContent.toUpperCase();
+        if (/^FOR\b/i.test(sUpper) && !/\bTO\b/i.test(sUpper)) {
+          return { valid: false, reason: "FOR statement missing TO" };
+        }
+        if (/^IF\b/i.test(sUpper) && !/\bTHEN\b/i.test(sUpper)) {
+          return { valid: false, reason: "IF statement missing THEN" };
+        }
+        if (/^(GO\s*TO|GO\s*SUB|RESTORE|RUN|LINE)\s*$/i.test(sUpper)) {
+          return { valid: false, reason: "Missing jump target" };
+        }
+        const firstWordMatch = sUpper.match(/^([A-Z$#]+(?:\s+[A-Z$#]+)?)/);
+        if (!firstWordMatch) {
+          if (!/^[a-zA-Z_][a-zA-Z0-9_$]*\s*=/i.test(sContent)) {
+            return { valid: false, reason: "Invalid statement syntax" };
+          }
+        } else {
+          const w1 = firstWordMatch[1];
+          const singleWord = w1.split(/\s+/)[0];
+          const isKnown = BASIC_STATEMENTS.has(w1) || BASIC_STATEMENTS.has(singleWord) || /^[a-zA-Z_][a-zA-Z0-9_$]*\s*=/i.test(sContent);
+          if (!isKnown) {
+            return { valid: false, reason: `Unrecognized keyword: ${singleWord}` };
+          }
+        }
+      }
+      return { valid: true };
+    }
+    var SpectrumBeeper = class {
+      constructor(soundDir = null) {
+        if (!soundDir) {
+          try {
+            const candidate = path.join(__dirname, "..", "..", "media", "sound");
+            if (fs.existsSync(candidate)) {
+              soundDir = candidate;
+            }
+          } catch {
+          }
+        }
+        this.soundDir = soundDir;
+        this.clickSound = soundDir ? path.join(soundDir, "zx_click.wav") : null;
+        this.errorSound = soundDir ? path.join(soundDir, "zx_error.wav") : null;
+        this.cursorSound = soundDir ? path.join(soundDir, "zx_cursor.wav") : null;
+        this.process = null;
+        this.platform = process.platform;
+        this.isDisposed = false;
+        this.isSpawning = false;
+      }
+      _initProcess() {
+        if (this.isDisposed || this.process || this.isSpawning || !spawn) return;
+        try {
+          if (this.platform === "win32") {
+            this.isSpawning = true;
+            this.process = spawn("powershell", ["-NoProfile", "-Command", "-"], {
+              stdio: ["pipe", "ignore", "ignore"],
+              windowsHide: true
+            });
+            this.process.on("error", () => {
+              this.process = null;
+              this.isSpawning = false;
+            });
+            this.process.on("exit", () => {
+              this.process = null;
+              this.isSpawning = false;
+            });
+            if (this.process.stdin) {
+              this.process.stdin.on("error", () => {
+              });
+            }
+            if (this.clickSound && fs.existsSync(this.clickSound)) {
+              const esc = this.clickSound.replace(/'/g, "''");
+              this._write(`$click = New-Object System.Media.SoundPlayer('${esc}'); $click.Load()
+`);
+            }
+            if (this.errorSound && fs.existsSync(this.errorSound)) {
+              const esc = this.errorSound.replace(/'/g, "''");
+              this._write(`$err = New-Object System.Media.SoundPlayer('${esc}'); $err.Load()
+`);
+            }
+            if (this.cursorSound && fs.existsSync(this.cursorSound)) {
+              const esc = this.cursorSound.replace(/'/g, "''");
+              this._write(`$cursor = New-Object System.Media.SoundPlayer('${esc}'); $cursor.Load()
+`);
+            }
+            this.isSpawning = false;
+          }
+        } catch {
+          this.process = null;
+          this.isSpawning = false;
+        }
+      }
+      _write(cmd) {
+        if (this.isDisposed || !this.process) return;
+        try {
+          if (this.process.stdin && this.process.stdin.writable) {
+            this.process.stdin.write(cmd);
+          }
+        } catch {
+        }
+      }
+      click() {
+        if (this.isDisposed) return;
+        try {
+          if (this.platform === "win32") {
+            if (!this.process) this._initProcess();
+            if (this.clickSound && fs.existsSync(this.clickSound)) {
+              this._write("$click.Play()\n");
+            } else {
+              this._write("[console]::beep(987, 25)\n");
+            }
+          } else if (this.platform === "darwin") {
+            if (this.clickSound && fs.existsSync(this.clickSound)) {
+              if (spawn) spawn("afplay", [this.clickSound], { stdio: "ignore" });
+            } else if (spawn) {
+              spawn("osascript", ["-e", "beep 1"], { stdio: "ignore" });
+            }
+          } else {
+            if (this.clickSound && fs.existsSync(this.clickSound)) {
+              if (spawn) spawn("paplay", [this.clickSound], { stdio: "ignore" });
+            } else if (process.stdout && process.stdout.isTTY) {
+              process.stdout.write("\x07");
+            }
+          }
+        } catch {
+        }
+      }
+      // Alias for backward compatibility
+      beep() {
+        this.click();
+      }
+      error() {
+        if (this.isDisposed) return;
+        try {
+          if (this.platform === "win32") {
+            if (!this.process) this._initProcess();
+            if (this.errorSound && fs.existsSync(this.errorSound)) {
+              this._write("$err.Play()\n");
+            } else {
+              this._write("[console]::beep(64, 160)\n");
+            }
+          } else if (this.platform === "darwin") {
+            if (this.errorSound && fs.existsSync(this.errorSound)) {
+              if (spawn) spawn("afplay", [this.errorSound], { stdio: "ignore" });
+            } else if (spawn) {
+              spawn("osascript", ["-e", "beep 1"], { stdio: "ignore" });
+            }
+          } else {
+            if (this.errorSound && fs.existsSync(this.errorSound)) {
+              if (spawn) spawn("paplay", [this.errorSound], { stdio: "ignore" });
+            } else if (process.stdout && process.stdout.isTTY) {
+              process.stdout.write("\x07");
+            }
+          }
+        } catch {
+        }
+      }
+      cursor() {
+        if (this.isDisposed) return;
+        try {
+          if (this.platform === "win32") {
+            if (!this.process) this._initProcess();
+            if (this.cursorSound && fs.existsSync(this.cursorSound)) {
+              this._write("$cursor.Play()\n");
+            } else {
+              this._write("[console]::beep(1200, 10)\n");
+            }
+          } else if (this.platform === "darwin") {
+            if (this.cursorSound && fs.existsSync(this.cursorSound)) {
+              if (spawn) spawn("afplay", [this.cursorSound], { stdio: "ignore" });
+            }
+          } else {
+            if (this.cursorSound && fs.existsSync(this.cursorSound)) {
+              if (spawn) spawn("paplay", [this.cursorSound], { stdio: "ignore" });
+            }
+          }
+        } catch {
+        }
+      }
+      dispose() {
+        this.isDisposed = true;
+        if (this.process) {
+          try {
+            if (this.process.stdin) {
+              this.process.stdin.removeAllListeners("error");
+              this.process.stdin.on("error", () => {
+              });
+              this.process.stdin.end();
+            }
+            this.process.kill();
+          } catch {
+          }
+          this.process = null;
+        }
+      }
+    };
+    var RETRO_COLOR_KEYS = [
+      "editor.background",
+      "editor.foreground",
+      "editorLineNumber.foreground",
+      "editorLineNumber.activeForeground",
+      "editorCursor.foreground",
+      "editor.selectionBackground",
+      "editor.selectionHighlightBackground",
+      "editor.selectionHighlightBorder",
+      "editor.wordHighlightBackground",
+      "editor.wordHighlightStrongBackground",
+      "editor.findMatchHighlightBackground",
+      "editor.findMatchBackground",
+      "editor.lineHighlightBackground"
+    ];
+    var RETRO_COLORS = {
+      "editor.background": "#FFFFFF",
+      "editor.foreground": "#000000",
+      "editorLineNumber.foreground": "#888888",
+      "editorLineNumber.activeForeground": "#000000",
+      "editorCursor.foreground": "#000000",
+      // Soft, clear Sinclair cyan selection - 100% readable text without dark grey wash
+      "editor.selectionBackground": "#00D7D744",
+      "editor.selectionHighlightBackground": "#00D7D718",
+      "editor.selectionHighlightBorder": "#00D7D766",
+      "editor.wordHighlightBackground": "#00D7D718",
+      "editor.wordHighlightStrongBackground": "#00D7D730",
+      "editor.findMatchHighlightBackground": "#FFE06688",
+      "editor.findMatchBackground": "#FFCC00AA",
+      "editor.lineHighlightBackground": "#F8F8F8"
+    };
+    var RETRO_FONT_FAMILY = "'ZX Spectrum Unicode', 'ZXSpectrum', 'Courier New', monospace";
+    var RetroModeController2 = class {
+      constructor(vscode2, context = null) {
+        this.vscode = vscode2;
+        this.context = context;
+        const soundDir = context && context.extensionPath ? path.join(context.extensionPath, "media", "sound") : null;
+        this.beeper = new SpectrumBeeper(soundDir);
+        this.statusBarItem = null;
+        this.isAutoFormatting = false;
+        this.isTyping = false;
+        this.typingTimeout = null;
+        this.lastCursorLine = -1;
+        this.lastCursorCol = -1;
+        this.lastSelectionChangeTime = 0;
+        this.disposables = [];
+      }
+      async init() {
+        try {
+          const workbenchConfig = this.vscode.workspace.getConfiguration("workbench");
+          const currentTheme = workbenchConfig.get("colorTheme");
+          if (currentTheme && currentTheme.includes("Sinclair ZX Spectrum")) {
+            await workbenchConfig.update("colorTheme", void 0, this.vscode.ConfigurationTarget.Global);
+          }
+        } catch {
+        }
+        if (this.context && this.context.extensionPath) {
+          ensureFontInstalled(this.context.extensionPath);
+        }
+        this.statusBarItem = this.vscode.window.createStatusBarItem(this.vscode.StatusBarAlignment.Right, 95);
+        this.statusBarItem.command = "sinclairBasic.toggleRetroMode";
+        this.disposables.push(this.statusBarItem);
+        this.disposables.push(
+          this.vscode.commands.registerCommand("sinclairBasic.toggleRetroMode", () => this.toggleRetroMode())
+        );
+        this.disposables.push(
+          this.vscode.workspace.onDidChangeTextDocument((e) => this.handleTextDocumentChange(e))
+        );
+        this.disposables.push(
+          this.vscode.window.onDidChangeTextEditorSelection((e) => this.handleSelectionChange(e))
+        );
+        this.disposables.push(
+          this.vscode.window.onDidChangeActiveTextEditor(() => this.updateUi())
+        );
+        this.disposables.push(
+          this.vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration("sinclairBasic.retroMode")) {
+              this.updateUi();
+            }
+          })
+        );
+        const isEnabled = this.isRetroEnabled();
+        await this.applyRetroStyles(isEnabled);
+        this.updateUi();
+      }
+      isRetroEnabled() {
+        return this.vscode.workspace.getConfiguration("sinclairBasic").get("retroMode.enabled", false);
+      }
+      isBasicEditor(editor) {
+        if (!editor || !editor.document) return false;
+        const lang = editor.document.languageId;
+        return lang === "sinclair-basic" || lang === "jbas";
+      }
+      async toggleRetroMode() {
+        const config = this.vscode.workspace.getConfiguration("sinclairBasic");
+        const current = config.get("retroMode.enabled", false);
+        const next = !current;
+        await config.update("retroMode.enabled", next, this.vscode.ConfigurationTarget.Global);
+        await this.applyRetroStyles(next);
+        if (next) {
+          this.beeper.beep();
+          this.vscode.window.showInformationMessage("\u{1F579}\uFE0F Modo Retro Sinclair BASIC: ACTIVADO (Pantalla blanca y fuente 8x8)");
+        } else {
+          this.vscode.window.showInformationMessage("Modo Retro Sinclair BASIC: Desactivado (Editor normal)");
+        }
+        this.updateUi();
+      }
+      async applyRetroStyles(enabled) {
+        try {
+          const workbenchConfig = this.vscode.workspace.getConfiguration("workbench");
+          const colors = { ...workbenchConfig.get("colorCustomizations", {}) };
+          if (enabled) {
+            Object.assign(colors, RETRO_COLORS);
+            await workbenchConfig.update("colorCustomizations", colors, this.vscode.ConfigurationTarget.Global);
+            try {
+              await this.vscode.commands.executeCommand("workbench.action.closeSidebar");
+            } catch {
+            }
+            try {
+              await this.vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+            } catch {
+            }
+            try {
+              await this.vscode.commands.executeCommand("workbench.action.closePanel");
+            } catch {
+            }
+            for (const langId of ["sinclair-basic", "jbas"]) {
+              const langConfig = this.vscode.workspace.getConfiguration("", { languageId: langId });
+              await langConfig.update("editor.fontFamily", RETRO_FONT_FAMILY, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.fontSize", 19, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.fontWeight", "bold", this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.lineHeight", 24, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.lineNumbers", "off", this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.minimap.enabled", false, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.glyphMargin", false, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.folding", false, this.vscode.ConfigurationTarget.Global, true);
+            }
+          } else {
+            for (const k of RETRO_COLOR_KEYS) {
+              delete colors[k];
+            }
+            const newColors = Object.keys(colors).length > 0 ? colors : void 0;
+            await workbenchConfig.update("colorCustomizations", newColors, this.vscode.ConfigurationTarget.Global);
+            for (const langId of ["sinclair-basic", "jbas"]) {
+              const langConfig = this.vscode.workspace.getConfiguration("", { languageId: langId });
+              await langConfig.update("editor.fontFamily", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.fontSize", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.fontWeight", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.lineHeight", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.lineNumbers", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.minimap.enabled", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.glyphMargin", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await langConfig.update("editor.folding", void 0, this.vscode.ConfigurationTarget.Global, true);
+            }
+            try {
+              await this.vscode.commands.executeCommand("workbench.view.explorer");
+            } catch {
+            }
+            const currentTheme = workbenchConfig.get("colorTheme");
+            if (currentTheme && currentTheme.includes("Sinclair ZX Spectrum")) {
+              await workbenchConfig.update("colorTheme", void 0, this.vscode.ConfigurationTarget.Global);
+            }
+          }
+        } catch (err) {
+          console.error("Error applying retro styles:", err);
+        }
+      }
+      updateUi() {
+        const editor = this.vscode.window.activeTextEditor;
+        if (this.isBasicEditor(editor)) {
+          const enabled = this.isRetroEnabled();
+          this.statusBarItem.text = enabled ? "$(sparkle) ZX Retro: ON" : "$(sparkle) ZX Retro: OFF";
+          this.statusBarItem.tooltip = enabled ? "Modo Retro ZX Spectrum activo. Clic para desactivar." : "Clic para activar el Modo Retro ZX Spectrum.";
+          this.statusBarItem.show();
+        } else {
+          this.statusBarItem.hide();
+        }
+      }
+      handleSelectionChange(e) {
+        if (this.isAutoFormatting || this.isTyping || !this.isRetroEnabled()) return;
+        const editor = this.vscode.window.activeTextEditor;
+        if (!this.isBasicEditor(editor) || e.textEditor !== editor) return;
+        const config = this.vscode.workspace.getConfiguration("sinclairBasic");
+        const beepOnCursor = config.get("retroMode.beepOnCursor", true);
+        if (!beepOnCursor) return;
+        if (!editor.selection) return;
+        const pos = editor.selection.active;
+        if (pos.line === this.lastCursorLine && pos.character === this.lastCursorCol) {
+          return;
+        }
+        this.lastCursorLine = pos.line;
+        this.lastCursorCol = pos.character;
+        const now = Date.now();
+        if (now - this.lastSelectionChangeTime < 55) {
+          return;
+        }
+        this.lastSelectionChangeTime = now;
+        this.beeper.cursor();
+      }
+      async handleTextDocumentChange(e) {
+        if (this.isAutoFormatting || !this.isRetroEnabled()) return;
+        const lang = e.document.languageId;
+        if (lang !== "sinclair-basic" && lang !== "jbas") return;
+        if (!e.contentChanges || e.contentChanges.length === 0) return;
+        const change = e.contentChanges[0];
+        this.isTyping = true;
+        if (this.typingTimeout) clearTimeout(this.typingTimeout);
+        this.typingTimeout = setTimeout(() => {
+          this.isTyping = false;
+        }, 60);
+        const isEnter = (change.text === "\n" || change.text === "\r\n") && change.rangeLength === 0;
+        if (!isEnter) return;
+        const config = this.vscode.workspace.getConfiguration("sinclairBasic");
+        const beepOnEnter = config.get("retroMode.beepOnEnter", true);
+        const beepOnError = config.get("retroMode.beepOnError", true);
+        const formatOnEnter = config.get("retroMode.formatOnEnter", true);
+        const lineIndex = change.range.start.line;
+        if (lineIndex >= 0 && lineIndex < e.document.lineCount) {
+          const line = e.document.lineAt(lineIndex);
+          const originalText = line.text;
+          const validation = validateBasicLine(originalText, lang === "jbas");
+          if (!validation.valid) {
+            if (beepOnError) {
+              this.beeper.error();
+            }
+            return;
+          }
+          if (beepOnEnter) {
+            this.beeper.click();
+          }
+          if (formatOnEnter) {
+            const formattedText = formatLineKeywords(originalText, lang === "jbas");
+            if (formattedText !== originalText) {
+              this.isAutoFormatting = true;
+              try {
+                const edit = new this.vscode.WorkspaceEdit();
+                edit.replace(e.document.uri, line.range, formattedText);
+                await this.vscode.workspace.applyEdit(edit);
+              } finally {
+                this.isAutoFormatting = false;
+              }
+            }
+          }
+        }
+      }
+      dispose() {
+        if (this.typingTimeout) {
+          clearTimeout(this.typingTimeout);
+        }
+        if (this.beeper) {
+          this.beeper.dispose();
+        }
+        this.disposables.forEach((d) => {
+          try {
+            d.dispose();
+          } catch {
+          }
+        });
+        this.disposables = [];
+      }
+    };
+    module2.exports = {
+      detectCursorMode,
+      validateBasicLine,
+      SpectrumBeeper,
+      formatLineKeywords,
+      RetroModeController: RetroModeController2,
+      ensureFontInstalled
+    };
+  }
+});
+
 // src/webExtension.js
 var vscode = require("vscode");
 var { renumberProgram } = require_renumber();
@@ -4916,6 +5597,8 @@ var {
 var { getTurbo80Html } = require_turbo80Html();
 var { extractProgramsFromTap, tapToBas, tapToJBas } = require_tapDecoder();
 var { basToJBas } = require_bas2jbas();
+var { RetroModeController } = require_retroMode();
+var retroModeController = null;
 function getBaseName(uri, extToRemove = "") {
   const segments = uri.path.split("/");
   const last = segments[segments.length - 1] || "program";
@@ -6044,9 +6727,16 @@ ${shareUrl}`,
     vscode.workspace.onDidChangeTextDocument((e) => validateJBasDocument(e.document)),
     vscode.workspace.onDidCloseTextDocument((doc) => jbasDiagnostics.delete(doc.uri))
   );
+  retroModeController = new RetroModeController(vscode, context);
+  retroModeController.init();
+  context.subscriptions.push(retroModeController);
   vscode.workspace.textDocuments.forEach(validateJBasDocument);
 }
 function deactivate() {
+  if (retroModeController) {
+    retroModeController.dispose();
+    retroModeController = null;
+  }
 }
 module.exports = {
   activate,
