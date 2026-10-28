@@ -339,3 +339,104 @@ test('RetroModeController rolls back theme, tabs, breadcrumbs, colors and layout
   ctrl1.dispose();
   ctrl2.dispose();
 });
+
+test('RetroModeController formats standalone run command, beeps OK, deletes the line and launches emulator', async () => {
+  const { RetroModeController, isDirectRunCommand, validateBasicLine } = require('../src/core/retroMode');
+
+  assert.strictEqual(isDirectRunCommand('run'), true);
+  assert.strictEqual(isDirectRunCommand('  RUN  '), true);
+  assert.strictEqual(isDirectRunCommand('10 RUN'), false);
+  assert.strictEqual(validateBasicLine('run', false).valid, true);
+  assert.strictEqual(validateBasicLine('run', false).isDirectRun, true);
+
+  const edits = [];
+  const executedCommands = [];
+  let saved = false;
+
+  class MockWorkspaceEdit {
+    constructor() {
+      this.ops = [];
+    }
+    replace(uri, range, text) {
+      this.ops.push({ type: 'replace', range, text });
+    }
+    delete(uri, range) {
+      this.ops.push({ type: 'delete', range });
+    }
+  }
+
+  const lines = ['10 PRINT "HOLA"', 'run', ''];
+  const mockDoc = {
+    uri: { toString: () => 'file:///test.bas' },
+    languageId: 'sinclair-basic',
+    isUntitled: false,
+    isDirty: true,
+    get lineCount() { return lines.length; },
+    lineAt: (idx) => ({
+      text: lines[idx],
+      range: { start: { line: idx, character: 0 }, end: { line: idx, character: lines[idx].length } },
+      rangeIncludingLineBreak: { start: { line: idx, character: 0 }, end: { line: idx + 1, character: 0 } }
+    }),
+    save: async () => { saved = true; }
+  };
+
+  const mockVscode = {
+    WorkspaceEdit: MockWorkspaceEdit,
+    Range: function (s, e) { return { start: s, end: e }; },
+    ConfigurationTarget: { Global: 1 },
+    StatusBarAlignment: { Right: 2 },
+    workspace: {
+      getConfiguration: () => ({
+        get: (k, def) => (k === 'retroMode.enabled' ? true : def),
+        inspect: () => ({})
+      }),
+      applyEdit: async (edit) => {
+        for (const op of edit.ops) {
+          edits.push(op);
+          if (op.type === 'replace') {
+            lines[op.range.start.line] = op.text;
+          } else if (op.type === 'delete') {
+            lines.splice(op.range.start.line, 1);
+          }
+        }
+        return true;
+      }
+    },
+    window: {
+      createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} })
+    },
+    commands: {
+      executeCommand: async (cmd, arg) => {
+        executedCommands.push({ cmd, arg });
+      }
+    }
+  };
+
+  const ctrl = new RetroModeController(mockVscode, null);
+  ctrl.runCommandDelayMs = 0;
+  let clicked = false;
+  ctrl.beeper = {
+    click: () => { clicked = true; },
+    error: () => {},
+    cursor: () => {},
+    dispose: () => {}
+  };
+
+  await ctrl.handleTextDocumentChange({
+    document: mockDoc,
+    contentChanges: [{ text: '\n', rangeLength: 0, range: { start: { line: 1, character: 3 } } }]
+  });
+
+  assert.strictEqual(clicked, true);
+  assert.strictEqual(edits.length, 2);
+  assert.strictEqual(edits[0].type, 'replace');
+  assert.strictEqual(edits[0].text, 'RUN');
+  assert.strictEqual(edits[1].type, 'delete');
+  assert.deepStrictEqual(lines, ['10 PRINT "HOLA"', '']);
+  assert.strictEqual(saved, true);
+  assert.strictEqual(executedCommands.length, 1);
+  assert.strictEqual(executedCommands[0].cmd, 'sinclairBasic.runEmulator');
+
+  ctrl.dispose();
+});
+

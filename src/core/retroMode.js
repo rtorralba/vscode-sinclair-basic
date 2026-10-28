@@ -120,12 +120,22 @@ const BASIC_STATEMENTS = new Set([
 ]);
 
 /**
+ * Detects whether a line is a standalone direct `RUN` command without a line number.
+ * @param {string} lineText
+ * @returns {boolean}
+ */
+function isDirectRunCommand(lineText) {
+  if (!lineText || typeof lineText !== 'string') return false;
+  return /^\s*run\s*$/i.test(lineText);
+}
+
+/**
  * Validates a single Sinclair BASIC (.bas) or JBAS (.jbas) line.
  * Emulates the syntax validation of the ZX Spectrum +3 / 128K full-screen editor.
  * 
  * @param {string} lineText
  * @param {boolean} [isJBas=false]
- * @returns {{ valid: boolean, reason?: string }}
+ * @returns {{ valid: boolean, reason?: string, isDirectRun?: boolean }}
  */
 function validateBasicLine(lineText, isJBas = false) {
   if (!lineText || lineText.trim().length === 0) {
@@ -133,6 +143,10 @@ function validateBasicLine(lineText, isJBas = false) {
   }
 
   const trimmed = lineText.trim();
+  if (isDirectRunCommand(trimmed)) {
+    return { valid: true, isDirectRun: true };
+  }
+
   let content = trimmed;
 
   // 1. Line numbers for standard .bas
@@ -1248,6 +1262,46 @@ class RetroModeController {
         this.beeper.click();
       }
 
+      // 2b. Direct `RUN` command (without line number) in Retro Mode:
+      // Format `run` -> `RUN`, play OK beep, delete the `RUN` line and launch the emulator!
+      if (retroEnabled && isDirectRunCommand(originalText)) {
+        if (formatOnEnter) {
+          const formattedText = formatLineKeywords(originalText, lang === 'jbas');
+          if (formattedText !== originalText) {
+            this.isAutoFormatting = true;
+            try {
+              const fmtEdit = new this.vscode.WorkspaceEdit();
+              fmtEdit.replace(e.document.uri, line.range, formattedText);
+              await this.vscode.workspace.applyEdit(fmtEdit);
+            } finally {
+              this.isAutoFormatting = false;
+            }
+          }
+        }
+
+        const delayMs = this.runCommandDelayMs !== undefined ? this.runCommandDelayMs : 120;
+        if (delayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+
+        this.isAutoFormatting = true;
+        try {
+          if (lineIndex < e.document.lineCount) {
+            const delEdit = new this.vscode.WorkspaceEdit();
+            delEdit.delete(e.document.uri, this.getLineDeletionRange(e.document, lineIndex));
+            await this.vscode.workspace.applyEdit(delEdit);
+          }
+          if (!e.document.isUntitled && e.document.isDirty && typeof e.document.save === 'function') {
+            await e.document.save();
+          }
+        } finally {
+          this.isAutoFormatting = false;
+        }
+
+        await this.vscode.commands.executeCommand('sinclairBasic.runEmulator', e.document.uri);
+        return;
+      }
+
       // 3. +3 BASIC Line Replacement: If line number already exists elsewhere in document, replace it!
       if (replaceExisting) {
         const replacement = calculateLineReplacement(e.document, lineIndex, {
@@ -1311,6 +1365,7 @@ class RetroModeController {
 
 module.exports = {
   detectCursorMode,
+  isDirectRunCommand,
   validateBasicLine,
   parseBasicLineNumber,
   findExistingLineIndex,

@@ -314,6 +314,9 @@ function activate(context) {
     activeDebugSourceMap = null;
 
     try {
+      if (doc.isDirty && !doc.isUntitled && typeof doc.save === 'function') {
+        await doc.save();
+      }
       const config = vscode.workspace.getConfiguration('sinclairBasic');
       const outDirName = config.get('outputDirectory', 'dist');
       const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
@@ -604,8 +607,12 @@ function activate(context) {
       stopOnEntry
     };
 
+    const targetColumn = (retroModeController && retroModeController.isRetroEnabled())
+      ? vscode.ViewColumn.One
+      : vscode.ViewColumn.Beside;
+
     if (currentTurbo80Panel) {
-      currentTurbo80Panel.reveal(vscode.ViewColumn.Beside, false);
+      currentTurbo80Panel.reveal(targetColumn, false);
       currentTurbo80Panel.title = `ZX: ${filename}${isDebug ? ' (Debug)' : ''}`;
       currentTurbo80Panel.webview.postMessage(payload);
     } else {
@@ -613,7 +620,7 @@ function activate(context) {
         'sinclairBasicTurbo80',
         `ZX: ${filename}${isDebug ? ' (Debug)' : ''}`,
         {
-          viewColumn: vscode.ViewColumn.Beside,
+          viewColumn: targetColumn,
           preserveFocus: false
         },
         {
@@ -636,6 +643,10 @@ function activate(context) {
           handleBasicResumed();
         } else if (message.command === 'debugStopped') {
           handleDebugStopped();
+        } else if (message.command === 'closeEmulator') {
+          if (currentTurbo80Panel) {
+            currentTurbo80Panel.dispose();
+          }
         }
       });
 

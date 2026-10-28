@@ -176,10 +176,11 @@ vscode-sinclair-basic/
      - **Reproductor persistente en memoria**: Emplea instancias pre-cargadas de `System.Media.SoundPlayer` (`$click`, `$err`, `$cursor`) en un único proceso PowerShell en segundo plano en Windows (y `afplay`/`paplay` en macOS/Linux), garantizando latencia 0 ms.
      - **Ajustes configurables en `package.json`**: `sinclairBasic.retroMode.beepOnEnter`, `sinclairBasic.retroMode.beepOnError`, `sinclairBasic.retroMode.beepOnCursor`, `sinclairBasic.retroMode.formatOnEnter`, `sinclairBasic.retroMode.replaceExistingLine` y `sinclairBasic.replaceExistingLineNumber`.
    - **Sustitución de líneas existentes (+3 BASIC)**: Al introducir una línea numerada en Sinclair BASIC (`.bas`), si el número de línea ya existe en otra parte del documento y la sintaxis es correcta, reemplaza automáticamente la línea existente con el nuevo contenido formateado y elimina la línea duplicada donde se escribió, emulando la inserción de sentencias del ZX Spectrum +3 BASIC. Si se introduce únicamente el número de línea (`10` + Enter), elimina la línea 10 del programa.
+   - **Comando directo `RUN` sin número de línea**: En modo retro, al escribir `run` (o `RUN`) solo en una línea sin número de línea y pulsar `Enter`, lo formatea a `RUN`, reproduce el pitido de confirmación `OK`, borra automáticamente la línea `RUN`, guarda el programa y lanza el emulador (`sinclairBasic.runEmulator`) en el panel principal (`ViewColumn.One`, con botón `← Volver al BASIC` en el pie del emulador).
    - **Franja inferior +3 BASIC (`buildBannerHtml`)**: En modo retro abre un webview sin bloquear el grupo de editores en un layout vertical `0.92 / 0.08` (respetando la altura mínima interna de 70px de `EditorGroupView` en VS Code para evitar el auto-maximizado), con la barra negra de 20px `+3 BASIC` pegada abajo (`justify-content: flex-end; padding: 0 18px`) sobre fondo `#D9D9D9` y las 4 franjas diagonales completas sin recortes (`padding-left: 14px`: rojo `#D8240F`, amarillo `#D8D800`, verde `#00D824`, cian `#00D8D8`).
 
 7. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 136 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 137 passing tests.
 
 ---
 
