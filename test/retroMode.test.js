@@ -249,3 +249,93 @@ test('buildBannerHtml draws +3 BASIC label and the four Spectrum stripes inside 
   assert.ok(html.includes('csp-source'));
   assert.ok(!buildBannerHtml().includes('@font-face'));
 });
+
+test('RetroModeController rolls back theme, tabs, breadcrumbs, colors and layout even after restart', async () => {
+  const { RetroModeController } = require('../src/core/retroMode');
+
+  const store = {
+    'workbench.colorTheme': 'One Dark Pro',
+    'workbench.editor.showTabs': 'multiple',
+    'breadcrumbs.enabled': true,
+    'workbench.colorCustomizations': { 'custom.userKey': '#123456' },
+    'sinclairBasic.retroMode.enabled': false
+  };
+  const globalStateMap = new Map();
+  const executedCommands = [];
+
+  const makeConfig = (section) => ({
+    get: (key, def) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      return store[fullKey] !== undefined ? store[fullKey] : def;
+    },
+    inspect: (key) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      return { globalValue: store[fullKey] };
+    },
+    update: async (key, val) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      store[fullKey] = val;
+    }
+  });
+
+  const mockVscode = {
+    ConfigurationTarget: { Global: 1 },
+    StatusBarAlignment: { Right: 2 },
+    ViewColumn: { Two: 2 },
+    workspace: {
+      getConfiguration: (section) => makeConfig(section),
+      onDidChangeTextDocument: () => ({ dispose() {} }),
+      onDidChangeConfiguration: () => ({ dispose() {} })
+    },
+    window: {
+      activeTextEditor: { document: { languageId: 'sinclair-basic' }, options: {} },
+      visibleTextEditors: [],
+      createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} }),
+      registerWebviewPanelSerializer: () => ({ dispose() {} }),
+      onDidChangeTextEditorSelection: () => ({ dispose() {} }),
+      onDidChangeActiveTextEditor: () => ({ dispose() {} }),
+      showInformationMessage: () => {}
+    },
+    commands: {
+      registerCommand: () => ({ dispose() {} }),
+      executeCommand: async (cmd) => { executedCommands.push(cmd); }
+    }
+  };
+
+  const mockContext = {
+    globalState: {
+      get: (k) => globalStateMap.get(k),
+      update: async (k, v) => {
+        if (v === undefined) globalStateMap.delete(k);
+        else globalStateMap.set(k, v);
+      }
+    }
+  };
+
+  // 1. Enable Retro Mode
+  const ctrl1 = new RetroModeController(mockVscode, mockContext);
+  await ctrl1.applyRetroStyles(true);
+  assert.strictEqual(store['workbench.colorTheme'], 'Default Light Modern');
+  assert.strictEqual(store['workbench.editor.showTabs'], 'none');
+  assert.strictEqual(store['breadcrumbs.enabled'], false);
+  assert.strictEqual(store['workbench.colorCustomizations']['editor.background'], '#D9D9D9');
+  assert.strictEqual(store['workbench.colorCustomizations']['custom.userKey'], '#123456');
+
+  // 2. Simulate closing and reopening VS Code while Retro Mode is still enabled
+  //    (applyRetroStyles(true) runs again on startup and MUST NOT overwrite savedTheme with Default Light Modern!)
+  const ctrl2 = new RetroModeController(mockVscode, mockContext);
+  await ctrl2.applyRetroStyles(true);
+  assert.strictEqual(globalStateMap.get('retroMode.savedTheme'), 'One Dark Pro');
+  assert.strictEqual(globalStateMap.get('retroMode.savedShowTabs'), 'multiple');
+
+  // 3. Deactivate Retro Mode -> must restore 100% of user's original settings
+  await ctrl2.applyRetroStyles(false);
+  assert.strictEqual(store['workbench.colorTheme'], 'One Dark Pro');
+  assert.strictEqual(store['workbench.editor.showTabs'], 'multiple');
+  assert.strictEqual(store['breadcrumbs.enabled'], true);
+  assert.deepStrictEqual(store['workbench.colorCustomizations'], { 'custom.userKey': '#123456' });
+  assert.ok(executedCommands.includes('workbench.action.editorLayoutSingle'));
+
+  ctrl1.dispose();
+  ctrl2.dispose();
+});

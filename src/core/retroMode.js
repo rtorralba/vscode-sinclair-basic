@@ -724,6 +724,22 @@ class RetroModeController {
       ensureFontInstalled(this.context.extensionPath);
     }
 
+    // 0c. Dispose any leftover deserialized +3 BASIC banner webview from a previous VS Code session
+    //     so reopening VS Code with Retro Mode enabled never leaves a dead blank white webview tab!
+    if (typeof this.vscode.window.registerWebviewPanelSerializer === 'function') {
+      try {
+        this.disposables.push(
+          this.vscode.window.registerWebviewPanelSerializer('sinclairBasicBanner', {
+            async deserializeWebviewPanel(webviewPanel) {
+              try {
+                webviewPanel.dispose();
+              } catch {}
+            }
+          })
+        );
+      } catch {}
+    }
+
     // 1. Status Bar Item
     this.statusBarItem = this.vscode.window.createStatusBarItem(this.vscode.StatusBarAlignment.Right, 95);
     this.statusBarItem.command = 'sinclairBasic.toggleRetroMode';
@@ -746,7 +762,12 @@ class RetroModeController {
 
     // 4. Active editor change
     this.disposables.push(
-      this.vscode.window.onDidChangeActiveTextEditor(() => this.updateUi())
+      this.vscode.window.onDidChangeActiveTextEditor(editor => {
+        this.updateUi();
+        if (this.isRetroEnabled() && this.isBasicEditor(editor) && !this.bannerPanel) {
+          this.openBanner();
+        }
+      })
     );
 
     // 5. Configuration change
@@ -758,14 +779,42 @@ class RetroModeController {
       })
     );
 
-    // Apply or clean up retro styles according to current setting
+    // Apply retro styles if enabled, or clean up ONLY if leftover retro styles exist from a previous session
     const isEnabled = this.isRetroEnabled();
-    await this.applyRetroStyles(isEnabled);
+    if (isEnabled || this.hasLeftoverRetroStyles()) {
+      await this.applyRetroStyles(isEnabled);
+    }
 
     this.updateUi();
   }
 
+  hasLeftoverRetroStyles() {
+    try {
+      if (this.context && this.context.globalState) {
+        if (this.context.globalState.get('retroMode.savedTheme') !== undefined ||
+            this.context.globalState.get('retroMode.savedShowTabs') !== undefined) {
+          return true;
+        }
+      }
+      const workbenchConfig = this.vscode.workspace.getConfiguration('workbench');
+      const colors = workbenchConfig.get('colorCustomizations', {});
+      if (colors && (colors['editor.background'] === '#D9D9D9' || colors['editorCursor.foreground'] === '#2A2AF0')) {
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
   isRetroEnabled() {
+    if (typeof this.retroEnabledOverride === 'boolean') {
+      return this.retroEnabledOverride;
+    }
+    if (this.context && this.context.globalState) {
+      const stateVal = this.context.globalState.get('retroMode.enabled');
+      if (typeof stateVal === 'boolean') {
+        return stateVal;
+      }
+    }
     return this.vscode.workspace.getConfiguration('sinclairBasic').get('retroMode.enabled', false);
   }
 
@@ -775,12 +824,26 @@ class RetroModeController {
     return lang === 'sinclair-basic' || lang === 'jbas';
   }
 
+  hasVisibleBasicEditor() {
+    if (this.isBasicEditor(this.vscode.window.activeTextEditor)) return true;
+    if (Array.isArray(this.vscode.window.visibleTextEditors)) {
+      return this.vscode.window.visibleTextEditors.some(ed => this.isBasicEditor(ed));
+    }
+    return false;
+  }
+
   async toggleRetroMode() {
     const config = this.vscode.workspace.getConfiguration('sinclairBasic');
-    const current = config.get('retroMode.enabled', false);
+    const current = this.isRetroEnabled();
     const next = !current;
 
-    await config.update('retroMode.enabled', next, this.vscode.ConfigurationTarget.Global);
+    this.retroEnabledOverride = next;
+    if (this.context && this.context.globalState) {
+      try {
+        await this.context.globalState.update('retroMode.enabled', next);
+      } catch {}
+    }
+    await this.safeUpdate(config, 'retroMode.enabled', next, this.vscode.ConfigurationTarget.Global);
     await this.applyRetroStyles(next);
 
     if (next) {
@@ -799,34 +862,55 @@ class RetroModeController {
     } catch {}
   }
 
+  getInspectedGlobalValue(config, key) {
+    try {
+      if (typeof config.inspect === 'function') {
+        const info = config.inspect(key);
+        if (info && Object.prototype.hasOwnProperty.call(info, 'globalValue')) {
+          return info.globalValue;
+        }
+      }
+    } catch {}
+    return config.get(key);
+  }
+
   async applyRetroStyles(enabled) {
     try {
       const workbenchConfig = this.vscode.workspace.getConfiguration('workbench');
+      const breadcrumbsConfig = this.vscode.workspace.getConfiguration('breadcrumbs');
       const colors = { ...workbenchConfig.get('colorCustomizations', {}) };
 
       if (enabled) {
-        // 0. Save current theme and switch to light mode so Windows OS renders the mouse cursor (I-beam) in BLACK
+        // 0. Save user's original theme (only if not already on Default Light Modern) and switch to light mode
         const currentTheme = workbenchConfig.get('colorTheme');
-        if (currentTheme !== 'Default Light Modern') {
+        const isRetroLightTheme = currentTheme === 'Default Light Modern' || (currentTheme && currentTheme.includes('Sinclair ZX Spectrum'));
+        if (!isRetroLightTheme) {
           if (this.context && this.context.globalState) {
-            await this.context.globalState.update('retroMode.savedTheme', currentTheme);
+            const rawTheme = this.getInspectedGlobalValue(workbenchConfig, 'colorTheme');
+            const toSave = (rawTheme && rawTheme !== 'Default Light Modern' && !rawTheme.includes('Sinclair ZX Spectrum'))
+              ? rawTheme
+              : '__DEFAULT__';
+            await this.context.globalState.update('retroMode.savedTheme', toSave);
           }
           await this.safeUpdate(workbenchConfig, 'colorTheme', 'Default Light Modern', this.vscode.ConfigurationTarget.Global);
         }
 
-        // 0b. Hide editor tabs & breadcrumbs so the editor and +3 BASIC banner merge into a single seamless Spectrum screen
+        // 0b. Save user's original showTabs & breadcrumbs (only if not already in retro state)
         const currentShowTabs = workbenchConfig.get('editor.showTabs');
         if (currentShowTabs !== 'none') {
           if (this.context && this.context.globalState) {
-            await this.context.globalState.update('retroMode.savedShowTabs', currentShowTabs);
+            const rawShowTabs = this.getInspectedGlobalValue(workbenchConfig, 'editor.showTabs');
+            const toSave = (rawShowTabs && rawShowTabs !== 'none') ? rawShowTabs : '__DEFAULT__';
+            await this.context.globalState.update('retroMode.savedShowTabs', toSave);
           }
           await this.safeUpdate(workbenchConfig, 'editor.showTabs', 'none', this.vscode.ConfigurationTarget.Global);
         }
-        const breadcrumbsConfig = this.vscode.workspace.getConfiguration('breadcrumbs');
         const currentBreadcrumbs = breadcrumbsConfig.get('enabled');
         if (currentBreadcrumbs !== false) {
           if (this.context && this.context.globalState) {
-            await this.context.globalState.update('retroMode.savedBreadcrumbs', currentBreadcrumbs);
+            const rawBreadcrumbs = this.getInspectedGlobalValue(breadcrumbsConfig, 'enabled');
+            const toSave = (rawBreadcrumbs !== undefined && rawBreadcrumbs !== false) ? rawBreadcrumbs : '__DEFAULT__';
+            await this.context.globalState.update('retroMode.savedBreadcrumbs', toSave);
           }
           await this.safeUpdate(breadcrumbsConfig, 'enabled', false, this.vscode.ConfigurationTarget.Global);
         }
@@ -881,9 +965,11 @@ class RetroModeController {
         }
 
         // 3. +3 BASIC banner: slim black strip with the four Spectrum colours below the editor
-        await this.openBanner();
+        if (this.hasVisibleBasicEditor()) {
+          await this.openBanner();
+        }
       } else {
-        // 0. Remove the +3 BASIC banner and restore the single editor layout
+        // 0. Always remove the +3 BASIC banner, unlock any locked group and restore single editor layout
         await this.closeBanner();
 
         // 1. Remove retro color customizations so the editor returns 100% to normal theme
@@ -893,7 +979,7 @@ class RetroModeController {
         const newColors = Object.keys(colors).length > 0 ? colors : undefined;
         await this.safeUpdate(workbenchConfig, 'colorCustomizations', newColors, this.vscode.ConfigurationTarget.Global);
 
-        // 2. Restore user's original color theme (dark or custom), tabs & breadcrumbs
+        // 2. Restore user's original color theme (dark or custom), tabs & breadcrumbs with 100% safe fallback
         let savedTheme = undefined;
         let savedShowTabs = undefined;
         let savedBreadcrumbs = undefined;
@@ -905,16 +991,27 @@ class RetroModeController {
           await this.context.globalState.update('retroMode.savedShowTabs', undefined);
           await this.context.globalState.update('retroMode.savedBreadcrumbs', undefined);
         }
+
         const currentTheme = workbenchConfig.get('colorTheme');
         if (currentTheme === 'Default Light Modern' || (currentTheme && currentTheme.includes('Sinclair ZX Spectrum'))) {
-          await this.safeUpdate(workbenchConfig, 'colorTheme', savedTheme, this.vscode.ConfigurationTarget.Global);
+          const themeToRestore = (!savedTheme || savedTheme === '__DEFAULT__' || savedTheme === 'Default Light Modern' || savedTheme.includes('Sinclair ZX Spectrum'))
+            ? undefined
+            : savedTheme;
+          await this.safeUpdate(workbenchConfig, 'colorTheme', themeToRestore, this.vscode.ConfigurationTarget.Global);
         }
+
         if (workbenchConfig.get('editor.showTabs') === 'none') {
-          await this.safeUpdate(workbenchConfig, 'editor.showTabs', savedShowTabs, this.vscode.ConfigurationTarget.Global);
+          const tabsToRestore = (!savedShowTabs || savedShowTabs === '__DEFAULT__' || savedShowTabs === 'none')
+            ? undefined
+            : savedShowTabs;
+          await this.safeUpdate(workbenchConfig, 'editor.showTabs', tabsToRestore, this.vscode.ConfigurationTarget.Global);
         }
-        const breadcrumbsConfig = this.vscode.workspace.getConfiguration('breadcrumbs');
-        if (breadcrumbsConfig.get('enabled') === false && savedBreadcrumbs !== false) {
-          await this.safeUpdate(breadcrumbsConfig, 'enabled', savedBreadcrumbs, this.vscode.ConfigurationTarget.Global);
+
+        if (breadcrumbsConfig.get('enabled') === false) {
+          const breadcrumbsToRestore = (savedBreadcrumbs === undefined || savedBreadcrumbs === '__DEFAULT__' || savedBreadcrumbs === false)
+            ? undefined
+            : savedBreadcrumbs;
+          await this.safeUpdate(breadcrumbsConfig, 'enabled', breadcrumbsToRestore, this.vscode.ConfigurationTarget.Global);
         }
 
         // 3. Remove font, size, cursor, padding, minimap and line numbers overrides so the editor returns 100% to normal
@@ -963,6 +1060,14 @@ class RetroModeController {
   async openBanner() {
     if (this.bannerPanel || !this.vscode.window.createWebviewPanel) return;
     try {
+      // 0. Ensure any leftover split/locked groups from a previous session are collapsed first
+      try {
+        await this.vscode.commands.executeCommand('workbench.action.unlockEditorGroup');
+      } catch {}
+      try {
+        await this.vscode.commands.executeCommand('workbench.action.editorLayoutSingle');
+      } catch {}
+
       // 1. Pre-create vertical split layout (85% top code editor / 15% bottom +3 BASIC strip)
       //    BEFORE opening the webview in ViewColumn.Two so VS Code doesn't split horizontally first.
       await this.vscode.commands.executeCommand('vscode.setEditorLayout', {
@@ -991,10 +1096,8 @@ class RetroModeController {
         this.bannerPanel = null;
       });
 
-      // 2. Lock the bottom banner group while it has focus so files never open inside it
-      await this.vscode.commands.executeCommand('workbench.action.lockEditorGroup');
-
-      // 3. Return focus to the BASIC editor in Group 1, then shrink the bottom strip to 8% height
+      // 2. Return focus to the BASIC editor in Group 1, then shrink the bottom strip to 8% height
+      //    (Do NOT lock Group 2 so VS Code never persists an uncloseable empty white group on restart!)
       await this.vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
       await this.vscode.commands.executeCommand('vscode.setEditorLayout', {
         orientation: 1,
@@ -1002,7 +1105,7 @@ class RetroModeController {
       });
       await this.vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
 
-      // 4. If the user ever clicks the bottom banner, immediately return focus to the BASIC editor
+      // 3. If the user ever clicks the bottom banner, immediately return focus to the BASIC editor
       if (typeof panel.onDidChangeViewState === 'function') {
         panel.onDidChangeViewState(e => {
           if (e.webviewPanel && e.webviewPanel.active) {
@@ -1020,9 +1123,23 @@ class RetroModeController {
       if (this.bannerPanel) {
         const panel = this.bannerPanel;
         this.bannerPanel = null;
-        panel.dispose();
-        await this.vscode.commands.executeCommand('workbench.action.editorLayoutSingle');
+        try {
+          panel.dispose();
+        } catch {}
       }
+      // Always unlock any locked editor group and collapse back to a single editor layout,
+      // even if bannerPanel was null (e.g. when rolling back after restarting VS Code).
+      try {
+        await this.vscode.commands.executeCommand('workbench.action.focusSecondEditorGroup');
+        await this.vscode.commands.executeCommand('workbench.action.unlockEditorGroup');
+      } catch {}
+      try {
+        await this.vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+        await this.vscode.commands.executeCommand('workbench.action.unlockEditorGroup');
+      } catch {}
+      try {
+        await this.vscode.commands.executeCommand('workbench.action.editorLayoutSingle');
+      } catch {}
     } catch (err) {
       console.error('Error closing +3 BASIC banner:', err);
     }
@@ -1030,11 +1147,13 @@ class RetroModeController {
 
   updateUi() {
     const editor = this.vscode.window.activeTextEditor;
-    if (this.isBasicEditor(editor)) {
-      const enabled = this.isRetroEnabled();
+    const enabled = this.isRetroEnabled();
+    // Always show the status bar toggle when Retro Mode is ON (even if no .bas file is focused)
+    // so the user can ALWAYS click it to deactivate and roll back!
+    if (enabled || this.isBasicEditor(editor)) {
       this.statusBarItem.text = enabled ? '$(sparkle) ZX Retro: ON' : '$(sparkle) ZX Retro: OFF';
       this.statusBarItem.tooltip = enabled
-        ? 'Modo Retro ZX Spectrum activo. Clic para desactivar.'
+        ? 'Modo Retro ZX Spectrum activo. Clic para desactivar y restaurar VS Code.'
         : 'Clic para activar el Modo Retro ZX Spectrum.';
       this.statusBarItem.show();
     } else {
