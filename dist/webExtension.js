@@ -5135,6 +5135,72 @@ var require_retroMode = __commonJS({
       }
       return { valid: true };
     }
+    function parseBasicLineNumber(text) {
+      if (typeof text !== "string") return null;
+      const match = text.trimStart().match(/^(\d+)(?:\s+(.*)|\s*)$/);
+      if (!match) return null;
+      const lineNum = parseInt(match[1], 10);
+      if (isNaN(lineNum) || lineNum < 1 || lineNum > 9999) return null;
+      return {
+        lineNum,
+        command: (match[2] || "").trim()
+      };
+    }
+    function findExistingLineIndex(documentOrLines, lineNum, excludeIndex = -1) {
+      if (!documentOrLines) return -1;
+      const count = typeof documentOrLines.lineCount === "number" ? documentOrLines.lineCount : documentOrLines.length;
+      for (let i = 0; i < count; i++) {
+        if (i === excludeIndex) continue;
+        let lineText = "";
+        if (typeof documentOrLines.lineAt === "function") {
+          lineText = documentOrLines.lineAt(i).text;
+        } else {
+          const item = documentOrLines[i];
+          lineText = typeof item === "string" ? item : item && item.text ? item.text : "";
+        }
+        const parsed = parseBasicLineNumber(lineText);
+        if (parsed && parsed.lineNum === lineNum) {
+          return i;
+        }
+      }
+      return -1;
+    }
+    function calculateLineReplacement(documentOrLines, submittedLineIndex, options = {}) {
+      const { isJBas = false, formatKeywords = true } = options;
+      if (!documentOrLines) return { shouldReplace: false };
+      let submittedLine = "";
+      if (typeof documentOrLines.lineAt === "function") {
+        if (submittedLineIndex < 0 || submittedLineIndex >= documentOrLines.lineCount) {
+          return { shouldReplace: false };
+        }
+        submittedLine = documentOrLines.lineAt(submittedLineIndex).text;
+      } else {
+        if (submittedLineIndex < 0 || submittedLineIndex >= documentOrLines.length) {
+          return { shouldReplace: false };
+        }
+        const item = documentOrLines[submittedLineIndex];
+        submittedLine = typeof item === "string" ? item : item && item.text ? item.text : "";
+      }
+      const parsed = parseBasicLineNumber(submittedLine);
+      if (!parsed) {
+        return { shouldReplace: false };
+      }
+      const { lineNum, command } = parsed;
+      const existingLineIndex = findExistingLineIndex(documentOrLines, lineNum, submittedLineIndex);
+      if (existingLineIndex === -1) {
+        return { shouldReplace: false, lineNum, isNew: true };
+      }
+      const isDeleteOnly = command.length === 0;
+      const formattedText = formatKeywords ? formatLineKeywords(submittedLine, isJBas) : submittedLine;
+      return {
+        shouldReplace: true,
+        existingLineIndex,
+        submittedLineIndex,
+        lineNum,
+        isDeleteOnly,
+        formattedText
+      };
+    }
     var SpectrumBeeper = class {
       constructor(soundDir = null) {
         if (!soundDir) {
@@ -5302,27 +5368,20 @@ var require_retroMode = __commonJS({
         }
       }
     };
-    var RETRO_COLOR_KEYS = [
-      "editor.background",
-      "editor.foreground",
-      "editorLineNumber.foreground",
-      "editorLineNumber.activeForeground",
-      "editorCursor.foreground",
-      "editor.selectionBackground",
-      "editor.selectionHighlightBackground",
-      "editor.selectionHighlightBorder",
-      "editor.wordHighlightBackground",
-      "editor.wordHighlightStrongBackground",
-      "editor.findMatchHighlightBackground",
-      "editor.findMatchBackground",
-      "editor.lineHighlightBackground"
-    ];
     var RETRO_COLORS = {
-      "editor.background": "#FFFFFF",
+      // Authentic ZX Spectrum +3 non-bright Paper 7 / Border 7 (#D9D9D9)
+      "editor.background": "#D9D9D9",
       "editor.foreground": "#000000",
+      "editorGutter.background": "#D9D9D9",
+      "editorGroup.border": "#D9D9D9",
+      "editorGroupHeader.noTabsBackground": "#D9D9D9",
+      "editorGroupHeader.tabsBackground": "#D9D9D9",
+      "sash.hoverBorder": "#D9D9D900",
       "editorLineNumber.foreground": "#888888",
       "editorLineNumber.activeForeground": "#000000",
-      "editorCursor.foreground": "#000000",
+      // Authentic ZX Spectrum Ink 1 blue block cursor (#2A2AF0)
+      "editorCursor.foreground": "#2A2AF0",
+      "editorCursor.background": "#D9D9D9",
       // Soft, clear Sinclair cyan selection - 100% readable text without dark grey wash
       "editor.selectionBackground": "#00D7D744",
       "editor.selectionHighlightBackground": "#00D7D718",
@@ -5331,8 +5390,102 @@ var require_retroMode = __commonJS({
       "editor.wordHighlightStrongBackground": "#00D7D730",
       "editor.findMatchHighlightBackground": "#FFE06688",
       "editor.findMatchBackground": "#FFCC00AA",
-      "editor.lineHighlightBackground": "#F8F8F8"
+      "editor.lineHighlightBackground": "#D9D9D9",
+      "editor.lineHighlightBorder": "#D9D9D900",
+      "editorOverviewRuler.border": "#D9D9D900",
+      "scrollbar.shadow": "#D9D9D900",
+      "scrollbarSlider.background": "#D9D9D900",
+      "scrollbarSlider.hoverBackground": "#00000022",
+      "scrollbarSlider.activeBackground": "#00000044",
+      // Suggest / IntelliSense Widget (Crisp Sinclair Paper 7 background, high-contrast readable text)
+      "editorSuggestWidget.background": "#FFFFFF",
+      "editorSuggestWidget.foreground": "#000000",
+      "editorSuggestWidget.border": "#00A3A6",
+      "editorSuggestWidget.selectedBackground": "#0078D4",
+      "editorSuggestWidget.selectedForeground": "#FFFFFF",
+      "editorSuggestWidget.selectedIconForeground": "#FFFFFF",
+      "editorSuggestWidget.highlightForeground": "#0066CC",
+      "editorSuggestWidget.focusHighlightForeground": "#FFE066",
+      "editorSuggestWidgetStatus.foreground": "#666666",
+      // Hover & Tooltip Widgets (Function docs, previews)
+      "editorHoverWidget.background": "#FFFFFF",
+      "editorHoverWidget.foreground": "#000000",
+      "editorHoverWidget.border": "#00A3A6",
+      "editorHoverWidget.statusBarBackground": "#F5F5F5",
+      // General Editor Widgets (Find & Replace, Parameter hints)
+      "editorWidget.background": "#FFFFFF",
+      "editorWidget.foreground": "#000000",
+      "editorWidget.border": "#00A3A6"
     };
+    function buildBannerHtml(fontUri = "", cspSource = "") {
+      const fontFace = fontUri ? `@font-face { font-family: 'ZXBanner'; src: url('${fontUri}') format('truetype'); }` : "";
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${cspSource}; font-src ${cspSource};">
+<style>
+${fontFace}
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #D9D9D9;
+  overflow: hidden;
+  user-select: none;
+}
+.screen-bottom {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 18px 0 18px;
+  background: #D9D9D9;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 20px;
+  background: #000000;
+  overflow: hidden;
+}
+.label {
+  color: #D9D9D9;
+  font-family: 'ZXBanner', 'ZX Spectrum Unicode', 'Courier New', monospace;
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding-left: 6px;
+  line-height: 20px;
+  text-transform: uppercase;
+}
+.stripes {
+  display: flex;
+  height: 100%;
+  padding-left: 14px;
+  padding-right: 18px;
+}
+.stripe {
+  width: 16px;
+  height: 100%;
+  transform: skewX(-42deg);
+  margin-right: -1px;
+}
+.red { background: #FF0000; }
+.yellow { background: #FFFF00; }
+.green { background: #00FF00; }
+.cyan { background: #00FFFF; }
+</style>
+</head>
+<body>
+<div class="screen-bottom"><div class="bar"><span class="label">+3 BASIC</span><div class="stripes"><i class="stripe red"></i><i class="stripe yellow"></i><i class="stripe green"></i><i class="stripe cyan"></i></div></div></div>
+</body>
+</html>`;
+    }
+    var RETRO_COLOR_KEYS = Object.keys(RETRO_COLORS);
     var RETRO_FONT_FAMILY = "'ZX Spectrum Unicode', 'ZXSpectrum', 'Courier New', monospace";
     var RetroModeController2 = class {
       constructor(vscode2, context = null) {
@@ -5341,6 +5494,7 @@ var require_retroMode = __commonJS({
         const soundDir = context && context.extensionPath ? path.join(context.extensionPath, "media", "sound") : null;
         this.beeper = new SpectrumBeeper(soundDir);
         this.statusBarItem = null;
+        this.bannerPanel = null;
         this.isAutoFormatting = false;
         this.isTyping = false;
         this.typingTimeout = null;
@@ -5409,13 +5563,41 @@ var require_retroMode = __commonJS({
         }
         this.updateUi();
       }
+      async safeUpdate(config, key, value, target, overrideInLanguage = false) {
+        try {
+          await config.update(key, value, target, overrideInLanguage);
+        } catch {
+        }
+      }
       async applyRetroStyles(enabled) {
         try {
           const workbenchConfig = this.vscode.workspace.getConfiguration("workbench");
           const colors = { ...workbenchConfig.get("colorCustomizations", {}) };
           if (enabled) {
+            const currentTheme = workbenchConfig.get("colorTheme");
+            if (currentTheme !== "Default Light Modern") {
+              if (this.context && this.context.globalState) {
+                await this.context.globalState.update("retroMode.savedTheme", currentTheme);
+              }
+              await this.safeUpdate(workbenchConfig, "colorTheme", "Default Light Modern", this.vscode.ConfigurationTarget.Global);
+            }
+            const currentShowTabs = workbenchConfig.get("editor.showTabs");
+            if (currentShowTabs !== "none") {
+              if (this.context && this.context.globalState) {
+                await this.context.globalState.update("retroMode.savedShowTabs", currentShowTabs);
+              }
+              await this.safeUpdate(workbenchConfig, "editor.showTabs", "none", this.vscode.ConfigurationTarget.Global);
+            }
+            const breadcrumbsConfig = this.vscode.workspace.getConfiguration("breadcrumbs");
+            const currentBreadcrumbs = breadcrumbsConfig.get("enabled");
+            if (currentBreadcrumbs !== false) {
+              if (this.context && this.context.globalState) {
+                await this.context.globalState.update("retroMode.savedBreadcrumbs", currentBreadcrumbs);
+              }
+              await this.safeUpdate(breadcrumbsConfig, "enabled", false, this.vscode.ConfigurationTarget.Global);
+            }
             Object.assign(colors, RETRO_COLORS);
-            await workbenchConfig.update("colorCustomizations", colors, this.vscode.ConfigurationTarget.Global);
+            await this.safeUpdate(workbenchConfig, "colorCustomizations", colors, this.vscode.ConfigurationTarget.Global);
             try {
               await this.vscode.commands.executeCommand("workbench.action.closeSidebar");
             } catch {
@@ -5428,45 +5610,157 @@ var require_retroMode = __commonJS({
               await this.vscode.commands.executeCommand("workbench.action.closePanel");
             } catch {
             }
+            const gTarget = this.vscode.ConfigurationTarget.Global;
             for (const langId of ["sinclair-basic", "jbas"]) {
               const langConfig = this.vscode.workspace.getConfiguration("", { languageId: langId });
-              await langConfig.update("editor.fontFamily", RETRO_FONT_FAMILY, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.fontSize", 19, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.fontWeight", "bold", this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.lineHeight", 24, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.lineNumbers", "off", this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.minimap.enabled", false, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.glyphMargin", false, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.folding", false, this.vscode.ConfigurationTarget.Global, true);
+              await this.safeUpdate(langConfig, "editor.fontFamily", RETRO_FONT_FAMILY, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.fontSize", 19, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.fontWeight", "bold", gTarget, true);
+              await this.safeUpdate(langConfig, "editor.lineHeight", 24, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.lineNumbers", "off", gTarget, true);
+              await this.safeUpdate(langConfig, "editor.minimap.enabled", false, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.glyphMargin", true, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.folding", false, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.cursorStyle", "block", gTarget, true);
+              await this.safeUpdate(langConfig, "editor.cursorBlinking", "blink", gTarget, true);
+              await this.safeUpdate(langConfig, "editor.padding", { top: 28, bottom: 0 }, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.renderLineHighlight", "none", gTarget, true);
+              await this.safeUpdate(langConfig, "editor.overviewRulerBorder", false, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.hideCursorInOverviewRuler", true, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.scrollbar.vertical", "hidden", gTarget, true);
+              await this.safeUpdate(langConfig, "editor.scrollbar.horizontal", "hidden", gTarget, true);
             }
+            if (Array.isArray(this.vscode.window.visibleTextEditors)) {
+              for (const ed of this.vscode.window.visibleTextEditors) {
+                if (this.isBasicEditor(ed) && ed.options) {
+                  try {
+                    ed.options = { ...ed.options, lineNumbers: 0, cursorStyle: 2 };
+                  } catch {
+                  }
+                }
+              }
+            }
+            await this.openBanner();
           } else {
+            await this.closeBanner();
             for (const k of RETRO_COLOR_KEYS) {
               delete colors[k];
             }
             const newColors = Object.keys(colors).length > 0 ? colors : void 0;
-            await workbenchConfig.update("colorCustomizations", newColors, this.vscode.ConfigurationTarget.Global);
+            await this.safeUpdate(workbenchConfig, "colorCustomizations", newColors, this.vscode.ConfigurationTarget.Global);
+            let savedTheme = void 0;
+            let savedShowTabs = void 0;
+            let savedBreadcrumbs = void 0;
+            if (this.context && this.context.globalState) {
+              savedTheme = this.context.globalState.get("retroMode.savedTheme");
+              savedShowTabs = this.context.globalState.get("retroMode.savedShowTabs");
+              savedBreadcrumbs = this.context.globalState.get("retroMode.savedBreadcrumbs");
+              await this.context.globalState.update("retroMode.savedTheme", void 0);
+              await this.context.globalState.update("retroMode.savedShowTabs", void 0);
+              await this.context.globalState.update("retroMode.savedBreadcrumbs", void 0);
+            }
+            const currentTheme = workbenchConfig.get("colorTheme");
+            if (currentTheme === "Default Light Modern" || currentTheme && currentTheme.includes("Sinclair ZX Spectrum")) {
+              await this.safeUpdate(workbenchConfig, "colorTheme", savedTheme, this.vscode.ConfigurationTarget.Global);
+            }
+            if (workbenchConfig.get("editor.showTabs") === "none") {
+              await this.safeUpdate(workbenchConfig, "editor.showTabs", savedShowTabs, this.vscode.ConfigurationTarget.Global);
+            }
+            const breadcrumbsConfig = this.vscode.workspace.getConfiguration("breadcrumbs");
+            if (breadcrumbsConfig.get("enabled") === false && savedBreadcrumbs !== false) {
+              await this.safeUpdate(breadcrumbsConfig, "enabled", savedBreadcrumbs, this.vscode.ConfigurationTarget.Global);
+            }
+            const gTarget = this.vscode.ConfigurationTarget.Global;
             for (const langId of ["sinclair-basic", "jbas"]) {
               const langConfig = this.vscode.workspace.getConfiguration("", { languageId: langId });
-              await langConfig.update("editor.fontFamily", void 0, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.fontSize", void 0, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.fontWeight", void 0, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.lineHeight", void 0, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.lineNumbers", void 0, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.minimap.enabled", void 0, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.glyphMargin", void 0, this.vscode.ConfigurationTarget.Global, true);
-              await langConfig.update("editor.folding", void 0, this.vscode.ConfigurationTarget.Global, true);
+              await this.safeUpdate(langConfig, "editor.fontFamily", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.fontSize", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.fontWeight", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.lineHeight", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.cursorStyle", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.cursorBlinking", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.padding", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.lineDecorationsWidth", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.renderLineHighlight", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.overviewRulerBorder", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.hideCursorInOverviewRuler", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.scrollbar.vertical", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.scrollbar.horizontal", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.lineNumbers", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.minimap.enabled", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.glyphMargin", void 0, gTarget, true);
+              await this.safeUpdate(langConfig, "editor.folding", void 0, gTarget, true);
+            }
+            if (Array.isArray(this.vscode.window.visibleTextEditors)) {
+              for (const ed of this.vscode.window.visibleTextEditors) {
+                if (this.isBasicEditor(ed) && ed.options) {
+                  try {
+                    ed.options = { ...ed.options, lineNumbers: 1, cursorStyle: 1 };
+                  } catch {
+                  }
+                }
+              }
             }
             try {
               await this.vscode.commands.executeCommand("workbench.view.explorer");
             } catch {
             }
-            const currentTheme = workbenchConfig.get("colorTheme");
-            if (currentTheme && currentTheme.includes("Sinclair ZX Spectrum")) {
-              await workbenchConfig.update("colorTheme", void 0, this.vscode.ConfigurationTarget.Global);
-            }
           }
         } catch (err) {
           console.error("Error applying retro styles:", err);
+        }
+      }
+      async openBanner() {
+        if (this.bannerPanel || !this.vscode.window.createWebviewPanel) return;
+        try {
+          await this.vscode.commands.executeCommand("vscode.setEditorLayout", {
+            orientation: 1,
+            groups: [{ size: 0.85 }, { size: 0.15 }]
+          });
+          const mediaFonts = this.context && this.context.extensionUri ? this.vscode.Uri.joinPath(this.context.extensionUri, "media", "fonts") : null;
+          const panel = this.vscode.window.createWebviewPanel(
+            "sinclairBasicBanner",
+            "+3 BASIC",
+            { viewColumn: this.vscode.ViewColumn.Two, preserveFocus: false },
+            {
+              enableScripts: false,
+              localResourceRoots: mediaFonts ? [mediaFonts] : []
+            }
+          );
+          const fontUri = mediaFonts ? panel.webview.asWebviewUri(this.vscode.Uri.joinPath(mediaFonts, "ZXSpectrum.ttf")).toString() : "";
+          panel.webview.html = buildBannerHtml(fontUri, panel.webview.cspSource);
+          this.bannerPanel = panel;
+          panel.onDidDispose(() => {
+            this.bannerPanel = null;
+          });
+          await this.vscode.commands.executeCommand("workbench.action.lockEditorGroup");
+          await this.vscode.commands.executeCommand("workbench.action.focusFirstEditorGroup");
+          await this.vscode.commands.executeCommand("vscode.setEditorLayout", {
+            orientation: 1,
+            groups: [{ size: 0.92 }, { size: 0.08 }]
+          });
+          await this.vscode.commands.executeCommand("workbench.action.focusFirstEditorGroup");
+          if (typeof panel.onDidChangeViewState === "function") {
+            panel.onDidChangeViewState((e) => {
+              if (e.webviewPanel && e.webviewPanel.active) {
+                this.vscode.commands.executeCommand("workbench.action.focusFirstEditorGroup");
+              }
+            });
+          }
+        } catch (err) {
+          console.error("Error opening +3 BASIC banner:", err);
+        }
+      }
+      async closeBanner() {
+        try {
+          if (this.bannerPanel) {
+            const panel = this.bannerPanel;
+            this.bannerPanel = null;
+            panel.dispose();
+            await this.vscode.commands.executeCommand("workbench.action.editorLayoutSingle");
+          }
+        } catch (err) {
+          console.error("Error closing +3 BASIC banner:", err);
         }
       }
       updateUi() {
@@ -5501,8 +5795,22 @@ var require_retroMode = __commonJS({
         this.lastSelectionChangeTime = now;
         this.beeper.cursor();
       }
+      getLineDeletionRange(document, lineIndex) {
+        const line = document.lineAt(lineIndex);
+        if (lineIndex < document.lineCount - 1) {
+          return line.rangeIncludingLineBreak;
+        }
+        if (lineIndex > 0) {
+          const prevLine = document.lineAt(lineIndex - 1);
+          return new this.vscode.Range(prevLine.range.end, line.range.end);
+        }
+        return line.range;
+      }
       async handleTextDocumentChange(e) {
-        if (this.isAutoFormatting || !this.isRetroEnabled()) return;
+        const retroEnabled = this.isRetroEnabled();
+        const config = this.vscode.workspace.getConfiguration("sinclairBasic");
+        const replaceOutsideRetro = config.get("replaceExistingLineNumber", false);
+        if (this.isAutoFormatting || !retroEnabled && !replaceOutsideRetro) return;
         const lang = e.document.languageId;
         if (lang !== "sinclair-basic" && lang !== "jbas") return;
         if (!e.contentChanges || e.contentChanges.length === 0) return;
@@ -5514,23 +5822,46 @@ var require_retroMode = __commonJS({
         }, 60);
         const isEnter = (change.text === "\n" || change.text === "\r\n") && change.rangeLength === 0;
         if (!isEnter) return;
-        const config = this.vscode.workspace.getConfiguration("sinclairBasic");
         const beepOnEnter = config.get("retroMode.beepOnEnter", true);
         const beepOnError = config.get("retroMode.beepOnError", true);
         const formatOnEnter = config.get("retroMode.formatOnEnter", true);
+        const replaceExisting = config.get("retroMode.replaceExistingLine", true) || replaceOutsideRetro;
         const lineIndex = change.range.start.line;
         if (lineIndex >= 0 && lineIndex < e.document.lineCount) {
           const line = e.document.lineAt(lineIndex);
           const originalText = line.text;
           const validation = validateBasicLine(originalText, lang === "jbas");
           if (!validation.valid) {
-            if (beepOnError) {
+            if (retroEnabled && beepOnError) {
               this.beeper.error();
             }
             return;
           }
-          if (beepOnEnter) {
+          if (retroEnabled && beepOnEnter) {
             this.beeper.click();
+          }
+          if (replaceExisting) {
+            const replacement = calculateLineReplacement(e.document, lineIndex, {
+              isJBas: lang === "jbas",
+              formatKeywords: formatOnEnter
+            });
+            if (replacement.shouldReplace) {
+              const edit = new this.vscode.WorkspaceEdit();
+              const existingLine = e.document.lineAt(replacement.existingLineIndex);
+              if (replacement.isDeleteOnly) {
+                edit.delete(e.document.uri, this.getLineDeletionRange(e.document, replacement.existingLineIndex));
+              } else {
+                edit.replace(e.document.uri, existingLine.range, replacement.formattedText);
+              }
+              edit.delete(e.document.uri, this.getLineDeletionRange(e.document, lineIndex));
+              this.isAutoFormatting = true;
+              try {
+                await this.vscode.workspace.applyEdit(edit);
+              } finally {
+                this.isAutoFormatting = false;
+              }
+              return;
+            }
           }
           if (formatOnEnter) {
             const formattedText = formatLineKeywords(originalText, lang === "jbas");
@@ -5566,10 +5897,16 @@ var require_retroMode = __commonJS({
     module2.exports = {
       detectCursorMode,
       validateBasicLine,
+      parseBasicLineNumber,
+      findExistingLineIndex,
+      calculateLineReplacement,
       SpectrumBeeper,
       formatLineKeywords,
       RetroModeController: RetroModeController2,
-      ensureFontInstalled
+      ensureFontInstalled,
+      buildBannerHtml,
+      RETRO_COLORS,
+      RETRO_COLOR_KEYS
     };
   }
 });

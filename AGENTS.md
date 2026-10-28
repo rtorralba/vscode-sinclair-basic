@@ -167,11 +167,13 @@ vscode-sinclair-basic/
      - **Enter con error**: Si la línea tiene un error de sintaxis (comillas abiertas, falta número de línea en `.bas`, sintaxis inválida, etc.), reproduce el zumbido de advertencia auténtico RASP de 255 ms (`media/sound/zx_error.wav`).
      - **Movimiento de cursor**: Al navegar con las flechas o cambiar de selección, emite el clic auténtico de teclado de 22 ms (`media/sound/zx_cursor.wav`), con estrangulamiento (throttle) a 55 ms emulando la tasa de repetición real del Spectrum sin saturar.
      - **Reproductor persistente en memoria**: Emplea instancias pre-cargadas de `System.Media.SoundPlayer` (`$click`, `$err`, `$cursor`) en un único proceso PowerShell en segundo plano en Windows (y `afplay`/`paplay` en macOS/Linux), garantizando latencia 0 ms.
-     - **Ajustes configurables en `package.json`**: `sinclairBasic.retroMode.beepOnEnter`, `sinclairBasic.retroMode.beepOnError`, `sinclairBasic.retroMode.beepOnCursor` y `sinclairBasic.retroMode.formatOnEnter`.
+     - **Ajustes configurables en `package.json`**: `sinclairBasic.retroMode.beepOnEnter`, `sinclairBasic.retroMode.beepOnError`, `sinclairBasic.retroMode.beepOnCursor`, `sinclairBasic.retroMode.formatOnEnter`, `sinclairBasic.retroMode.replaceExistingLine` y `sinclairBasic.replaceExistingLineNumber`.
+   - **Sustitución de líneas existentes (+3 BASIC)**: Al introducir una línea numerada en Sinclair BASIC (`.bas`), si el número de línea ya existe en otra parte del documento y la sintaxis es correcta, reemplaza automáticamente la línea existente con el nuevo contenido formateado y elimina la línea duplicada donde se escribió, emulando la inserción de sentencias del ZX Spectrum +3 BASIC. Si se introduce únicamente el número de línea (`10` + Enter), elimina la línea 10 del programa.
+   - **Franja inferior +3 BASIC**: En modo retro se abre un webview (`buildBannerHtml`) en un grupo de editor bloqueado y estrecho bajo el editor (entre el editor y el terminal): franja negra con `+3 BASIC` en fuente ZX y las 4 franjas diagonales (rojo, amarillo, verde, cian). Se crea en `openBanner()` y se elimina en `closeBanner()` (restaura `editorLayoutSingle`) al desactivar.
    - **Cursor 100% normal**: Sin decoraciones ni artefactos artificiales de bloque sobre el cursor del editor.
 
 7. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 128 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 133 passing tests.
 
 ---
 

@@ -139,6 +139,7 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
   * **Cursor Navigation Click** (`media/sound/zx_cursor.wav`): Emits the subtle mechanical keyboard tick (22 ms) when navigating lines or moving the cursor with arrow keys (throttled to 55 ms to match genuine key-repeat cadence).
   * **Zero Latency**: Sounds are pre-loaded in memory via a persistent background audio engine.
 * **Auto-Uppercase Formatting on Enter**: When you press `Enter` on a valid line, all Sinclair BASIC keywords are instantly formatted to **UPPERCASE** (`print "hello" -> PRINT "hello"`), strictly preserving string literals (`"..."`) and comments (`REM`, `'`).
+* **+3 BASIC Line Number Substitution**: When you enter a numbered BASIC line (`.bas`) whose line number already exists in the document and press `Enter`, it automatically replaces the existing line with the new formatted content and cleans up the input line, emulating the ZX Spectrum +3 BASIC statement entry. Typing only a line number (e.g. `10` + `Enter`) deletes that line from the program.
 * **Clean Retro Display (Zero Distractions)**: Automatically applies white Paper 7 background strictly to the editor, sets authentic bold 8x8 ZX Spectrum font, closes the bottom panel, and hides the minimap and line numbers margin for true ZX Spectrum immersion.
 * **100% Reversible Switch**: Toggling off instantly restores the user's normal colors, theme, font, minimap, and line numbers.
 
@@ -179,6 +180,8 @@ You can customize the extension via VS Code Settings (`settings.json`):
   "sinclairBasic.retroMode.beepOnError": true,
   "sinclairBasic.retroMode.beepOnCursor": true,
   "sinclairBasic.retroMode.formatOnEnter": true,
+  "sinclairBasic.retroMode.replaceExistingLine": true,
+  "sinclairBasic.replaceExistingLineNumber": false,
   "sinclairBasic.emulatorType": "turbo80",
   "sinclairBasic.turbo80Model": "48k",
   "sinclairBasic.turbo80Crt": true,

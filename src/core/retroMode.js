@@ -278,6 +278,106 @@ function validateBasicLine(lineText, isJBas = false) {
 }
 
 /**
+ * Extracts line number and statement commands from a Sinclair BASIC line.
+ * Returns { lineNum: number, command: string } or null if unnumbered/out-of-range.
+ */
+function parseBasicLineNumber(text) {
+  if (typeof text !== 'string') return null;
+  const match = text.trimStart().match(/^(\d+)(?:\s+(.*)|\s*)$/);
+  if (!match) return null;
+  const lineNum = parseInt(match[1], 10);
+  if (isNaN(lineNum) || lineNum < 1 || lineNum > 9999) return null;
+  return {
+    lineNum,
+    command: (match[2] || '').trim()
+  };
+}
+
+/**
+ * Searches a document (or array of lines) for a line starting with lineNum,
+ * excluding the line at excludeIndex.
+ * Returns the line index if found, or -1 if not found.
+ */
+function findExistingLineIndex(documentOrLines, lineNum, excludeIndex = -1) {
+  if (!documentOrLines) return -1;
+  const count = typeof documentOrLines.lineCount === 'number'
+    ? documentOrLines.lineCount
+    : documentOrLines.length;
+
+  for (let i = 0; i < count; i++) {
+    if (i === excludeIndex) continue;
+    let lineText = '';
+    if (typeof documentOrLines.lineAt === 'function') {
+      lineText = documentOrLines.lineAt(i).text;
+    } else {
+      const item = documentOrLines[i];
+      lineText = typeof item === 'string' ? item : (item && item.text ? item.text : '');
+    }
+    const parsed = parseBasicLineNumber(lineText);
+    if (parsed && parsed.lineNum === lineNum) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Calculates +3 BASIC line replacement when a numbered line is entered.
+ * If the line number already exists at another line in the document, returns:
+ * {
+ *   shouldReplace: true,
+ *   existingLineIndex,
+ *   submittedLineIndex,
+ *   lineNum,
+ *   isDeleteOnly, // true if user typed only line number without command (e.g. "10")
+ *   formattedText
+ * }
+ */
+function calculateLineReplacement(documentOrLines, submittedLineIndex, options = {}) {
+  const { isJBas = false, formatKeywords = true } = options;
+  if (!documentOrLines) return { shouldReplace: false };
+
+  let submittedLine = '';
+  if (typeof documentOrLines.lineAt === 'function') {
+    if (submittedLineIndex < 0 || submittedLineIndex >= documentOrLines.lineCount) {
+      return { shouldReplace: false };
+    }
+    submittedLine = documentOrLines.lineAt(submittedLineIndex).text;
+  } else {
+    if (submittedLineIndex < 0 || submittedLineIndex >= documentOrLines.length) {
+      return { shouldReplace: false };
+    }
+    const item = documentOrLines[submittedLineIndex];
+    submittedLine = typeof item === 'string' ? item : (item && item.text ? item.text : '');
+  }
+
+  const parsed = parseBasicLineNumber(submittedLine);
+  if (!parsed) {
+    return { shouldReplace: false };
+  }
+
+  const { lineNum, command } = parsed;
+  const existingLineIndex = findExistingLineIndex(documentOrLines, lineNum, submittedLineIndex);
+  if (existingLineIndex === -1) {
+    return { shouldReplace: false, lineNum, isNew: true };
+  }
+
+  const isDeleteOnly = command.length === 0;
+  const formattedText = formatKeywords
+    ? formatLineKeywords(submittedLine, isJBas)
+    : submittedLine;
+
+  return {
+    shouldReplace: true,
+    existingLineIndex,
+    submittedLineIndex,
+    lineNum,
+    isDeleteOnly,
+    formattedText
+  };
+}
+
+/**
  * Spectrum Beeper: Emits authentic ZX Spectrum sound effects matching the +3 BASIC editor:
  * 1. Valid Enter confirmation keyclick (zx_click.wav).
  * 2. Syntax error RASP buzz (~64 Hz, zx_error.wav).
@@ -456,28 +556,20 @@ class SpectrumBeeper {
   }
 }
 
-const RETRO_COLOR_KEYS = [
-  'editor.background',
-  'editor.foreground',
-  'editorLineNumber.foreground',
-  'editorLineNumber.activeForeground',
-  'editorCursor.foreground',
-  'editor.selectionBackground',
-  'editor.selectionHighlightBackground',
-  'editor.selectionHighlightBorder',
-  'editor.wordHighlightBackground',
-  'editor.wordHighlightStrongBackground',
-  'editor.findMatchHighlightBackground',
-  'editor.findMatchBackground',
-  'editor.lineHighlightBackground'
-];
-
 const RETRO_COLORS = {
-  'editor.background': '#FFFFFF',
+  // Authentic ZX Spectrum +3 non-bright Paper 7 / Border 7 (#D9D9D9)
+  'editor.background': '#D9D9D9',
   'editor.foreground': '#000000',
+  'editorGutter.background': '#D9D9D9',
+  'editorGroup.border': '#D9D9D9',
+  'editorGroupHeader.noTabsBackground': '#D9D9D9',
+  'editorGroupHeader.tabsBackground': '#D9D9D9',
+  'sash.hoverBorder': '#D9D9D900',
   'editorLineNumber.foreground': '#888888',
   'editorLineNumber.activeForeground': '#000000',
-  'editorCursor.foreground': '#000000',
+  // Authentic ZX Spectrum Ink 1 blue block cursor (#2A2AF0)
+  'editorCursor.foreground': '#2A2AF0',
+  'editorCursor.background': '#D9D9D9',
   // Soft, clear Sinclair cyan selection - 100% readable text without dark grey wash
   'editor.selectionBackground': '#00D7D744',
   'editor.selectionHighlightBackground': '#00D7D718',
@@ -486,8 +578,112 @@ const RETRO_COLORS = {
   'editor.wordHighlightStrongBackground': '#00D7D730',
   'editor.findMatchHighlightBackground': '#FFE06688',
   'editor.findMatchBackground': '#FFCC00AA',
-  'editor.lineHighlightBackground': '#F8F8F8'
+  'editor.lineHighlightBackground': '#D9D9D9',
+  'editor.lineHighlightBorder': '#D9D9D900',
+  'editorOverviewRuler.border': '#D9D9D900',
+  'scrollbar.shadow': '#D9D9D900',
+  'scrollbarSlider.background': '#D9D9D900',
+  'scrollbarSlider.hoverBackground': '#00000022',
+  'scrollbarSlider.activeBackground': '#00000044',
+  // Suggest / IntelliSense Widget (Crisp Sinclair Paper 7 background, high-contrast readable text)
+  'editorSuggestWidget.background': '#FFFFFF',
+  'editorSuggestWidget.foreground': '#000000',
+  'editorSuggestWidget.border': '#00A3A6',
+  'editorSuggestWidget.selectedBackground': '#0078D4',
+  'editorSuggestWidget.selectedForeground': '#FFFFFF',
+  'editorSuggestWidget.selectedIconForeground': '#FFFFFF',
+  'editorSuggestWidget.highlightForeground': '#0066CC',
+  'editorSuggestWidget.focusHighlightForeground': '#FFE066',
+  'editorSuggestWidgetStatus.foreground': '#666666',
+  // Hover & Tooltip Widgets (Function docs, previews)
+  'editorHoverWidget.background': '#FFFFFF',
+  'editorHoverWidget.foreground': '#000000',
+  'editorHoverWidget.border': '#00A3A6',
+  'editorHoverWidget.statusBarBackground': '#F5F5F5',
+  // General Editor Widgets (Find & Replace, Parameter hints)
+  'editorWidget.background': '#FFFFFF',
+  'editorWidget.foreground': '#000000',
+  'editorWidget.border': '#00A3A6'
 };
+
+/**
+ * HTML for the +3 BASIC bottom banner (black bar, "+3 BASIC" label and the four diagonal
+ * Spectrum stripes: red, yellow, green, cyan, framed inside the #D9D9D9 Spectrum border).
+ * Pure function so it can be unit tested.
+ */
+function buildBannerHtml(fontUri = '', cspSource = '') {
+  const fontFace = fontUri
+    ? `@font-face { font-family: 'ZXBanner'; src: url('${fontUri}') format('truetype'); }`
+    : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${cspSource}; font-src ${cspSource};">
+<style>
+${fontFace}
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #D9D9D9;
+  overflow: hidden;
+  user-select: none;
+}
+.screen-bottom {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 18px 0 18px;
+  background: #D9D9D9;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 20px;
+  background: #000000;
+  overflow: hidden;
+}
+.label {
+  color: #D9D9D9;
+  font-family: 'ZXBanner', 'ZX Spectrum Unicode', 'Courier New', monospace;
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding-left: 6px;
+  line-height: 20px;
+  text-transform: uppercase;
+}
+.stripes {
+  display: flex;
+  height: 100%;
+  padding-left: 14px;
+  padding-right: 18px;
+}
+.stripe {
+  width: 16px;
+  height: 100%;
+  transform: skewX(-42deg);
+  margin-right: -1px;
+}
+.red { background: #FF0000; }
+.yellow { background: #FFFF00; }
+.green { background: #00FF00; }
+.cyan { background: #00FFFF; }
+</style>
+</head>
+<body>
+<div class="screen-bottom"><div class="bar"><span class="label">+3 BASIC</span><div class="stripes"><i class="stripe red"></i><i class="stripe yellow"></i><i class="stripe green"></i><i class="stripe cyan"></i></div></div></div>
+</body>
+</html>`;
+}
+
+// Derived automatically from RETRO_COLORS to guarantee 100% cleanup without leaving any leftover keys
+const RETRO_COLOR_KEYS = Object.keys(RETRO_COLORS);
 
 const RETRO_FONT_FAMILY = "'ZX Spectrum Unicode', 'ZXSpectrum', 'Courier New', monospace";
 
@@ -503,6 +699,7 @@ class RetroModeController {
       : null;
     this.beeper = new SpectrumBeeper(soundDir);
     this.statusBarItem = null;
+    this.bannerPanel = null;
     this.isAutoFormatting = false;
     this.isTyping = false;
     this.typingTimeout = null;
@@ -596,15 +793,47 @@ class RetroModeController {
     this.updateUi();
   }
 
+  async safeUpdate(config, key, value, target, overrideInLanguage = false) {
+    try {
+      await config.update(key, value, target, overrideInLanguage);
+    } catch {}
+  }
+
   async applyRetroStyles(enabled) {
     try {
       const workbenchConfig = this.vscode.workspace.getConfiguration('workbench');
       const colors = { ...workbenchConfig.get('colorCustomizations', {}) };
 
       if (enabled) {
-        // Apply white Paper 7 background ONLY to the editor canvas (rest of IDE stays dark/normal)
+        // 0. Save current theme and switch to light mode so Windows OS renders the mouse cursor (I-beam) in BLACK
+        const currentTheme = workbenchConfig.get('colorTheme');
+        if (currentTheme !== 'Default Light Modern') {
+          if (this.context && this.context.globalState) {
+            await this.context.globalState.update('retroMode.savedTheme', currentTheme);
+          }
+          await this.safeUpdate(workbenchConfig, 'colorTheme', 'Default Light Modern', this.vscode.ConfigurationTarget.Global);
+        }
+
+        // 0b. Hide editor tabs & breadcrumbs so the editor and +3 BASIC banner merge into a single seamless Spectrum screen
+        const currentShowTabs = workbenchConfig.get('editor.showTabs');
+        if (currentShowTabs !== 'none') {
+          if (this.context && this.context.globalState) {
+            await this.context.globalState.update('retroMode.savedShowTabs', currentShowTabs);
+          }
+          await this.safeUpdate(workbenchConfig, 'editor.showTabs', 'none', this.vscode.ConfigurationTarget.Global);
+        }
+        const breadcrumbsConfig = this.vscode.workspace.getConfiguration('breadcrumbs');
+        const currentBreadcrumbs = breadcrumbsConfig.get('enabled');
+        if (currentBreadcrumbs !== false) {
+          if (this.context && this.context.globalState) {
+            await this.context.globalState.update('retroMode.savedBreadcrumbs', currentBreadcrumbs);
+          }
+          await this.safeUpdate(breadcrumbsConfig, 'enabled', false, this.vscode.ConfigurationTarget.Global);
+        }
+
+        // Apply authentic Paper 7 (#D9D9D9) background ONLY to the editor canvas
         Object.assign(colors, RETRO_COLORS);
-        await workbenchConfig.update('colorCustomizations', colors, this.vscode.ConfigurationTarget.Global);
+        await this.safeUpdate(workbenchConfig, 'colorCustomizations', colors, this.vscode.ConfigurationTarget.Global);
 
         // 1. Close all panels (left sidebar, right sidebar, bottom panel) so only the editor remains:
         try {
@@ -617,52 +846,185 @@ class RetroModeController {
           await this.vscode.commands.executeCommand('workbench.action.closePanel');
         } catch {}
 
-        // 2. Apply authentic enlarged Sinclair ZX Spectrum pixel font (BOLD), hide line numbers & minimap ONLY for Sinclair BASIC
+        // 2. Apply authentic enlarged Sinclair ZX Spectrum pixel font (BOLD), blue block cursor, border margins, hide line numbers & minimap ONLY for Sinclair BASIC
+        const gTarget = this.vscode.ConfigurationTarget.Global;
         for (const langId of ['sinclair-basic', 'jbas']) {
           const langConfig = this.vscode.workspace.getConfiguration('', { languageId: langId });
-          await langConfig.update('editor.fontFamily', RETRO_FONT_FAMILY, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.fontSize', 19, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.fontWeight', 'bold', this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.lineHeight', 24, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.lineNumbers', 'off', this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.minimap.enabled', false, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.glyphMargin', false, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.folding', false, this.vscode.ConfigurationTarget.Global, true);
+          await this.safeUpdate(langConfig, 'editor.fontFamily', RETRO_FONT_FAMILY, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.fontSize', 19, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.fontWeight', 'bold', gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.lineHeight', 24, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.lineNumbers', 'off', gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.minimap.enabled', false, gTarget, true);
+          // Leave glyphMargin & folding true (with invisible icons) so the editor has a clean ~36px left Spectrum BORDER 7 margin!
+          await this.safeUpdate(langConfig, 'editor.glyphMargin', true, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.folding', false, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.cursorStyle', 'block', gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.cursorBlinking', 'blink', gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.padding', { top: 28, bottom: 0 }, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.renderLineHighlight', 'none', gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.overviewRulerBorder', false, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.hideCursorInOverviewRuler', true, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.scrollbar.vertical', 'hidden', gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.scrollbar.horizontal', 'hidden', gTarget, true);
         }
+
+        // Apply lineNumbers: Off (0) and cursorStyle: Block (2) immediately to open BASIC editors
+        if (Array.isArray(this.vscode.window.visibleTextEditors)) {
+          for (const ed of this.vscode.window.visibleTextEditors) {
+            if (this.isBasicEditor(ed) && ed.options) {
+              try {
+                ed.options = { ...ed.options, lineNumbers: 0, cursorStyle: 2 };
+              } catch {}
+            }
+          }
+        }
+
+        // 3. +3 BASIC banner: slim black strip with the four Spectrum colours below the editor
+        await this.openBanner();
       } else {
-        // Remove retro color customizations so the editor returns 100% to normal theme
+        // 0. Remove the +3 BASIC banner and restore the single editor layout
+        await this.closeBanner();
+
+        // 1. Remove retro color customizations so the editor returns 100% to normal theme
         for (const k of RETRO_COLOR_KEYS) {
           delete colors[k];
         }
         const newColors = Object.keys(colors).length > 0 ? colors : undefined;
-        await workbenchConfig.update('colorCustomizations', newColors, this.vscode.ConfigurationTarget.Global);
+        await this.safeUpdate(workbenchConfig, 'colorCustomizations', newColors, this.vscode.ConfigurationTarget.Global);
 
-        // Remove font, size, minimap and line numbers overrides so the editor returns 100% to normal
+        // 2. Restore user's original color theme (dark or custom), tabs & breadcrumbs
+        let savedTheme = undefined;
+        let savedShowTabs = undefined;
+        let savedBreadcrumbs = undefined;
+        if (this.context && this.context.globalState) {
+          savedTheme = this.context.globalState.get('retroMode.savedTheme');
+          savedShowTabs = this.context.globalState.get('retroMode.savedShowTabs');
+          savedBreadcrumbs = this.context.globalState.get('retroMode.savedBreadcrumbs');
+          await this.context.globalState.update('retroMode.savedTheme', undefined);
+          await this.context.globalState.update('retroMode.savedShowTabs', undefined);
+          await this.context.globalState.update('retroMode.savedBreadcrumbs', undefined);
+        }
+        const currentTheme = workbenchConfig.get('colorTheme');
+        if (currentTheme === 'Default Light Modern' || (currentTheme && currentTheme.includes('Sinclair ZX Spectrum'))) {
+          await this.safeUpdate(workbenchConfig, 'colorTheme', savedTheme, this.vscode.ConfigurationTarget.Global);
+        }
+        if (workbenchConfig.get('editor.showTabs') === 'none') {
+          await this.safeUpdate(workbenchConfig, 'editor.showTabs', savedShowTabs, this.vscode.ConfigurationTarget.Global);
+        }
+        const breadcrumbsConfig = this.vscode.workspace.getConfiguration('breadcrumbs');
+        if (breadcrumbsConfig.get('enabled') === false && savedBreadcrumbs !== false) {
+          await this.safeUpdate(breadcrumbsConfig, 'enabled', savedBreadcrumbs, this.vscode.ConfigurationTarget.Global);
+        }
+
+        // 3. Remove font, size, cursor, padding, minimap and line numbers overrides so the editor returns 100% to normal
+        const gTarget = this.vscode.ConfigurationTarget.Global;
         for (const langId of ['sinclair-basic', 'jbas']) {
           const langConfig = this.vscode.workspace.getConfiguration('', { languageId: langId });
-          await langConfig.update('editor.fontFamily', undefined, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.fontSize', undefined, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.fontWeight', undefined, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.lineHeight', undefined, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.lineNumbers', undefined, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.minimap.enabled', undefined, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.glyphMargin', undefined, this.vscode.ConfigurationTarget.Global, true);
-          await langConfig.update('editor.folding', undefined, this.vscode.ConfigurationTarget.Global, true);
+          await this.safeUpdate(langConfig, 'editor.fontFamily', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.fontSize', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.fontWeight', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.lineHeight', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.cursorStyle', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.cursorBlinking', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.padding', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.lineDecorationsWidth', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.renderLineHighlight', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.overviewRulerBorder', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.hideCursorInOverviewRuler', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.scrollbar.vertical', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.scrollbar.horizontal', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.lineNumbers', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.minimap.enabled', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.glyphMargin', undefined, gTarget, true);
+          await this.safeUpdate(langConfig, 'editor.folding', undefined, gTarget, true);
+        }
+
+        if (Array.isArray(this.vscode.window.visibleTextEditors)) {
+          for (const ed of this.vscode.window.visibleTextEditors) {
+            if (this.isBasicEditor(ed) && ed.options) {
+              try {
+                ed.options = { ...ed.options, lineNumbers: 1, cursorStyle: 1 };
+              } catch {}
+            }
+          }
         }
 
         // Restore normal workspace panels (re-open Explorer in sidebar)
         try {
           await this.vscode.commands.executeCommand('workbench.view.explorer');
         } catch {}
-
-        // Clean up theme if it was previously set
-        const currentTheme = workbenchConfig.get('colorTheme');
-        if (currentTheme && currentTheme.includes('Sinclair ZX Spectrum')) {
-          await workbenchConfig.update('colorTheme', undefined, this.vscode.ConfigurationTarget.Global);
-        }
       }
     } catch (err) {
       console.error('Error applying retro styles:', err);
+    }
+  }
+
+  async openBanner() {
+    if (this.bannerPanel || !this.vscode.window.createWebviewPanel) return;
+    try {
+      // 1. Pre-create vertical split layout (85% top code editor / 15% bottom +3 BASIC strip)
+      //    BEFORE opening the webview in ViewColumn.Two so VS Code doesn't split horizontally first.
+      await this.vscode.commands.executeCommand('vscode.setEditorLayout', {
+        orientation: 1,
+        groups: [{ size: 0.85 }, { size: 0.15 }]
+      });
+
+      const mediaFonts = this.context && this.context.extensionUri
+        ? this.vscode.Uri.joinPath(this.context.extensionUri, 'media', 'fonts')
+        : null;
+      const panel = this.vscode.window.createWebviewPanel(
+        'sinclairBasicBanner',
+        '+3 BASIC',
+        { viewColumn: this.vscode.ViewColumn.Two, preserveFocus: false },
+        {
+          enableScripts: false,
+          localResourceRoots: mediaFonts ? [mediaFonts] : []
+        }
+      );
+      const fontUri = mediaFonts
+        ? panel.webview.asWebviewUri(this.vscode.Uri.joinPath(mediaFonts, 'ZXSpectrum.ttf')).toString()
+        : '';
+      panel.webview.html = buildBannerHtml(fontUri, panel.webview.cspSource);
+      this.bannerPanel = panel;
+      panel.onDidDispose(() => {
+        this.bannerPanel = null;
+      });
+
+      // 2. Lock the bottom banner group while it has focus so files never open inside it
+      await this.vscode.commands.executeCommand('workbench.action.lockEditorGroup');
+
+      // 3. Return focus to the BASIC editor in Group 1, then shrink the bottom strip to 8% height
+      await this.vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+      await this.vscode.commands.executeCommand('vscode.setEditorLayout', {
+        orientation: 1,
+        groups: [{ size: 0.92 }, { size: 0.08 }]
+      });
+      await this.vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+
+      // 4. If the user ever clicks the bottom banner, immediately return focus to the BASIC editor
+      if (typeof panel.onDidChangeViewState === 'function') {
+        panel.onDidChangeViewState(e => {
+          if (e.webviewPanel && e.webviewPanel.active) {
+            this.vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error opening +3 BASIC banner:', err);
+    }
+  }
+
+  async closeBanner() {
+    try {
+      if (this.bannerPanel) {
+        const panel = this.bannerPanel;
+        this.bannerPanel = null;
+        panel.dispose();
+        await this.vscode.commands.executeCommand('workbench.action.editorLayoutSingle');
+      }
+    } catch (err) {
+      console.error('Error closing +3 BASIC banner:', err);
     }
   }
 
@@ -707,8 +1069,24 @@ class RetroModeController {
     this.beeper.cursor();
   }
 
+  getLineDeletionRange(document, lineIndex) {
+    const line = document.lineAt(lineIndex);
+    if (lineIndex < document.lineCount - 1) {
+      return line.rangeIncludingLineBreak;
+    }
+    if (lineIndex > 0) {
+      const prevLine = document.lineAt(lineIndex - 1);
+      return new this.vscode.Range(prevLine.range.end, line.range.end);
+    }
+    return line.range;
+  }
+
   async handleTextDocumentChange(e) {
-    if (this.isAutoFormatting || !this.isRetroEnabled()) return;
+    const retroEnabled = this.isRetroEnabled();
+    const config = this.vscode.workspace.getConfiguration('sinclairBasic');
+    const replaceOutsideRetro = config.get('replaceExistingLineNumber', false);
+
+    if (this.isAutoFormatting || (!retroEnabled && !replaceOutsideRetro)) return;
     const lang = e.document.languageId;
     if (lang !== 'sinclair-basic' && lang !== 'jbas') return;
 
@@ -726,10 +1104,10 @@ class RetroModeController {
     const isEnter = (change.text === '\n' || change.text === '\r\n') && change.rangeLength === 0;
     if (!isEnter) return;
 
-    const config = this.vscode.workspace.getConfiguration('sinclairBasic');
     const beepOnEnter = config.get('retroMode.beepOnEnter', true);
     const beepOnError = config.get('retroMode.beepOnError', true);
     const formatOnEnter = config.get('retroMode.formatOnEnter', true);
+    const replaceExisting = config.get('retroMode.replaceExistingLine', true) || replaceOutsideRetro;
 
     const lineIndex = change.range.start.line;
     if (lineIndex >= 0 && lineIndex < e.document.lineCount) {
@@ -740,18 +1118,48 @@ class RetroModeController {
 
       if (!validation.valid) {
         // 1. Line has syntax error -> Emit authentic ZX Spectrum +3 / 128K RASP error buzz!
-        if (beepOnError) {
+        if (retroEnabled && beepOnError) {
           this.beeper.error();
         }
         return;
       }
 
       // 2. Line is valid -> Emit authentic ZX Spectrum confirmation keyclick!
-      if (beepOnEnter) {
+      if (retroEnabled && beepOnEnter) {
         this.beeper.click();
       }
 
-      // 3. Format keywords to uppercase on the submitted valid line
+      // 3. +3 BASIC Line Replacement: If line number already exists elsewhere in document, replace it!
+      if (replaceExisting) {
+        const replacement = calculateLineReplacement(e.document, lineIndex, {
+          isJBas: lang === 'jbas',
+          formatKeywords: formatOnEnter
+        });
+
+        if (replacement.shouldReplace) {
+          const edit = new this.vscode.WorkspaceEdit();
+          const existingLine = e.document.lineAt(replacement.existingLineIndex);
+
+          if (replacement.isDeleteOnly) {
+            edit.delete(e.document.uri, this.getLineDeletionRange(e.document, replacement.existingLineIndex));
+          } else {
+            edit.replace(e.document.uri, existingLine.range, replacement.formattedText);
+          }
+
+          // Delete the duplicate line where the user typed the command
+          edit.delete(e.document.uri, this.getLineDeletionRange(e.document, lineIndex));
+
+          this.isAutoFormatting = true;
+          try {
+            await this.vscode.workspace.applyEdit(edit);
+          } finally {
+            this.isAutoFormatting = false;
+          }
+          return;
+        }
+      }
+
+      // 4. Format keywords to uppercase on the submitted valid line (if not replaced above)
       if (formatOnEnter) {
         const formattedText = formatLineKeywords(originalText, lang === 'jbas');
         if (formattedText !== originalText) {
@@ -785,8 +1193,14 @@ class RetroModeController {
 module.exports = {
   detectCursorMode,
   validateBasicLine,
+  parseBasicLineNumber,
+  findExistingLineIndex,
+  calculateLineReplacement,
   SpectrumBeeper,
   formatLineKeywords,
   RetroModeController,
-  ensureFontInstalled
+  ensureFontInstalled,
+  buildBannerHtml,
+  RETRO_COLORS,
+  RETRO_COLOR_KEYS
 };

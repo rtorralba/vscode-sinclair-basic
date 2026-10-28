@@ -617,6 +617,18 @@
           "default": true,
           "description": "Automatically format keywords to UPPERCASE when pressing Enter on a valid line.",
           "order": 17
+        },
+        "sinclairBasic.retroMode.replaceExistingLine": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically replace an existing line in the document when entering a duplicate line number (emulating the ZX Spectrum +3 BASIC editor).",
+          "order": 18
+        },
+        "sinclairBasic.replaceExistingLineNumber": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always replace existing line numbers in Sinclair BASIC files on Enter, even when Retro Mode is disabled.",
+          "order": 19
         }
       }
     }
