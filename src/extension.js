@@ -607,12 +607,8 @@ function activate(context) {
       stopOnEntry
     };
 
-    const targetColumn = (retroModeController && retroModeController.isRetroEnabled())
-      ? vscode.ViewColumn.One
-      : vscode.ViewColumn.Beside;
-
     if (currentTurbo80Panel) {
-      currentTurbo80Panel.reveal(targetColumn, false);
+      currentTurbo80Panel.reveal(vscode.ViewColumn.Beside, false);
       currentTurbo80Panel.title = `ZX: ${filename}${isDebug ? ' (Debug)' : ''}`;
       currentTurbo80Panel.webview.postMessage(payload);
     } else {
@@ -620,7 +616,7 @@ function activate(context) {
         'sinclairBasicTurbo80',
         `ZX: ${filename}${isDebug ? ' (Debug)' : ''}`,
         {
-          viewColumn: targetColumn,
+          viewColumn: vscode.ViewColumn.Beside,
           preserveFocus: false
         },
         {
@@ -643,10 +639,6 @@ function activate(context) {
           handleBasicResumed();
         } else if (message.command === 'debugStopped') {
           handleDebugStopped();
-        } else if (message.command === 'closeEmulator') {
-          if (currentTurbo80Panel) {
-            currentTurbo80Panel.dispose();
-          }
         }
       });
 

@@ -126,7 +126,7 @@ const BASIC_STATEMENTS = new Set([
  */
 function isDirectRunCommand(lineText) {
   if (!lineText || typeof lineText !== 'string') return false;
-  return /^\s*run\s*$/i.test(lineText);
+  return /^\s*run(?:\s+\d+)?\s*$/i.test(lineText);
 }
 
 /**
@@ -1233,8 +1233,8 @@ class RetroModeController {
       this.isTyping = false;
     }, 60);
 
-    // Single Enter key detection
-    const isEnter = (change.text === '\n' || change.text === '\r\n') && change.rangeLength === 0;
+    // Single Enter key detection (including auto-indented newlines)
+    const isEnter = /^\r?\n[ \t]*$/.test(change.text) && change.rangeLength === 0;
     if (!isEnter) return;
 
     const beepOnEnter = config.get('retroMode.beepOnEnter', true);

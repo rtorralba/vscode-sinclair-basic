@@ -3612,22 +3612,6 @@ var require_turbo80Html = __commonJS({
       background: #57ef9e;
       box-shadow: 0 0 8px rgba(87, 239, 158, 0.7);
     }
-    .back-btn {
-      background: #242438;
-      color: #e9e9f2;
-      border: 1px solid #3d3d5c;
-      border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 11px;
-      font-family: inherit;
-      cursor: pointer;
-      transition: background 0.15s ease, border-color 0.15s ease;
-    }
-    .back-btn:hover {
-      background: #353554;
-      border-color: #37d0ff;
-      color: #ffffff;
-    }
     .attribution {
       display: inline-flex;
       align-items: center;
@@ -3642,7 +3626,6 @@ var require_turbo80Html = __commonJS({
   </div>
   <footer id="footer">
     <div class="status-badge">
-      <button id="btn-close-emulator" class="back-btn" title="Cerrar emulador y volver al c\xF3digo BASIC">&#8592; Volver al BASIC</button>
       <span class="status-dot"></span>
       <span id="game-title">Iniciando ZX Spectrum...</span>
     </div>
@@ -4195,13 +4178,6 @@ var require_turbo80Html = __commonJS({
     });
 
     window.addEventListener('DOMContentLoaded', () => {
-      const closeBtn = document.getElementById('btn-close-emulator');
-      if (closeBtn) {
-        closeBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          vscode.postMessage({ command: 'closeEmulator' });
-        });
-      }
       adjustEmulatorSizing();
       if (pendingData) {
         applyTap(pendingData);
@@ -5044,7 +5020,7 @@ var require_retroMode = __commonJS({
     ]);
     function isDirectRunCommand(lineText) {
       if (!lineText || typeof lineText !== "string") return false;
-      return /^\s*run\s*$/i.test(lineText);
+      return /^\s*run(?:\s+\d+)?\s*$/i.test(lineText);
     }
     function validateBasicLine(lineText, isJBas = false) {
       if (!lineText || lineText.trim().length === 0) {
@@ -5958,7 +5934,7 @@ html, body {
         this.typingTimeout = setTimeout(() => {
           this.isTyping = false;
         }, 60);
-        const isEnter = (change.text === "\n" || change.text === "\r\n") && change.rangeLength === 0;
+        const isEnter = /^\r?\n[ \t]*$/.test(change.text) && change.rangeLength === 0;
         if (!isEnter) return;
         const beepOnEnter = config.get("retroMode.beepOnEnter", true);
         const beepOnError = config.get("retroMode.beepOnError", true);
@@ -6432,9 +6408,8 @@ Haz clic para inspeccionar variables en RAM.`;
       breakpoints,
       stopOnEntry
     };
-    const targetColumn = retroModeController && retroModeController.isRetroEnabled() ? vscode.ViewColumn.One : vscode.ViewColumn.Beside;
     if (currentTurbo80Panel) {
-      currentTurbo80Panel.reveal(targetColumn, false);
+      currentTurbo80Panel.reveal(vscode.ViewColumn.Beside, false);
       currentTurbo80Panel.title = `ZX: ${filename}${isDebug ? " (Debug)" : ""}`;
       currentTurbo80Panel.webview.postMessage(payload);
     } else {
@@ -6442,7 +6417,7 @@ Haz clic para inspeccionar variables en RAM.`;
         "sinclairBasicTurbo80",
         `ZX: ${filename}${isDebug ? " (Debug)" : ""}`,
         {
-          viewColumn: targetColumn,
+          viewColumn: vscode.ViewColumn.Beside,
           preserveFocus: false
         },
         {
@@ -6463,10 +6438,6 @@ Haz clic para inspeccionar variables en RAM.`;
           handleBasicResumed();
         } else if (message.command === "debugStopped") {
           handleDebugStopped();
-        } else if (message.command === "closeEmulator") {
-          if (currentTurbo80Panel) {
-            currentTurbo80Panel.dispose();
-          }
         }
       });
       currentTurbo80Panel.onDidDispose(() => {
