@@ -7,4 +7,5 @@ test/**
 AGENTS.md
 GEMINI.md
 build.bat
+build.sh
 *.vsix

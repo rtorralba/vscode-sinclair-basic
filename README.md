@@ -140,8 +140,8 @@ A comprehensive VS Code extension for developing Sinclair ZX Spectrum BASIC appl
   * **Zero Latency**: Sounds are pre-loaded in memory via a persistent background audio engine.
 * **Auto-Uppercase Formatting on Enter**: When you press `Enter` on a valid line, all Sinclair BASIC keywords are instantly formatted to **UPPERCASE** (`print "hello" -> PRINT "hello"`), strictly preserving string literals (`"..."`) and comments (`REM`, `'`).
 * **+3 BASIC Line Number Substitution**: When you enter a numbered BASIC line (`.bas`) whose line number already exists in the document and press `Enter`, it automatically replaces the existing line with the new formatted content and cleans up the input line, emulating the ZX Spectrum +3 BASIC statement entry. Typing only a line number (e.g. `10` + `Enter`) deletes that line from the program.
-* **Clean Retro Display (Zero Distractions)**: Automatically applies white Paper 7 background strictly to the editor, sets authentic bold 8x8 ZX Spectrum font, closes the bottom panel, and hides the minimap and line numbers margin for true ZX Spectrum immersion.
-* **100% Reversible Switch**: Toggling off instantly restores the user's normal colors, theme, font, minimap, and line numbers.
+* **Clean Retro Display (Zero Distractions)**: Automatically applies authentic ZX Spectrum +3 Paper 7 / Border 7 (`#D9D9D9`) background and blue block cursor (`#2A2AF0`), sets the bold 8x8 ZX Spectrum font, displays the `+3 BASIC` bottom bar with the 4 diagonal Spectrum stripes, closes the bottom panel, and hides tabs, breadcrumbs, minimap, and line numbers margin for true ZX Spectrum immersion.
+* **100% Reversible Switch**: Toggling off (even after restarting VS Code) instantly restores the user's original theme, tabs, breadcrumbs, colors, font, minimap, line numbers, and single-group editor layout.
 
 ---
 

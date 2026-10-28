@@ -91,6 +91,8 @@ vscode-sinclair-basic/
 |   |-- retroMode.test.js                # Unit tests for retro mode cursor detector and sound beeper
 |   |-- completions.test.js              # Unit tests for autocompletion provider
 |   +-- debugger.test.js                 # Unit tests for Sinclair BASIC debugger engine
+|-- build.sh                             # Linux / WSL interactive builder, VSIX packager & Marketplace publisher
+|-- build.bat                            # Windows interactive builder, VSIX packager & Marketplace publisher
 |-- AGENTS.md                            # Complete AI instructions (this file)
 |-- README.md                            # User-facing documentation & quickstart
 |-- LICENSE                              # GNU AGPL v3 License (Copyright Raül Torralba & Turbo80 attribution)
@@ -158,10 +160,15 @@ vscode-sinclair-basic/
 
 6. **ZX Spectrum +3 BASIC Retro Mode (`src/core/retroMode.js`)**:
    - `sinclairBasic.toggleRetroMode`: Conmutador simple (switch ON/OFF) sin temas intrusivos ni popups molestos.
-   - **Pantalla blanca Paper 7 aplicada ÚNICAMENTE al lienzo del editor**: Vía `workbench.colorCustomizations`, convierte el fondo del editor en Paper 7 (`#FFFFFF`) y tinta en Ink 0 (`#000000`), manteniendo intacta la interfaz oscura del resto de VS Code. Con resaltados de selección en cian retro suave para máxima legibilidad.
+   - **Pantalla auténtica Paper 7 / Border 7 (`#D9D9D9`) y cursor de bloque azul (`#2A2AF0`)**: Vía `workbench.colorCustomizations`, convierte el fondo del editor y el borde de grupo (`editorGroup.border`) en el gris claro auténtico de Paper 7 del ZX Spectrum (`#D9D9D9`), tinta en Ink 0 (`#000000`) y cursor en bloque sólido azul (`#2A2AF0`, `cursorStyle: 'block'`), uniendo visualmente sin costuras el editor superior y la franja inferior `+3 BASIC`.
    - **Tipografía auténtica ZX Spectrum 8x8 ampliada y en negrita (Bold)**: Aplica la fuente oficial `ZX Spectrum Unicode` a 19px en negrita (`bold`) exclusivamente en ficheros `.bas` y `.jbas`.
-   - **Sin distracciones**: Oculta automáticamente los números de línea del editor (en Sinclair BASIC las líneas ya están numeradas en el propio código), oculta el minimapa y pliega el panel inferior para emular la pantalla completa del ZX Spectrum.
-   - **Restauración 100% al desactivar**: Al desactivar el modo retro, restaura de inmediato los números de línea, el minimapa, la fuente normal y los colores habituales del usuario.
+   - **Sin distracciones**: Oculta automáticamente los números de línea del editor (en Sinclair BASIC las líneas ya están numeradas en el propio código), oculta las pestañas (`showTabs: 'none'`), las migas de pan (`breadcrumbs.enabled: false`), el minimapa y pliega el panel inferior para emular la pantalla completa del ZX Spectrum +3.
+   - **Rollback 100% garantizado incluso tras cerrar y reabrir VS Code**:
+     - Registra `onStartupFinished` en `package.json` y un `WebviewPanelSerializer` (`sinclairBasicBanner`) que descarta automáticamente cualquier webview fantasma en blanco si VS Code se cerró con el modo retro activado.
+     - Mantiene siempre visible el botón `$(sparkle) ZX Retro: ON` en la barra de estado mientras el modo retro esté activo (aunque no haya ningún fichero `.bas` enfocado) para que el usuario pueda desactivarlo en cualquier momento.
+     - Guarda en `context.globalState` los valores originales del usuario (`savedTheme`, `savedShowTabs`, `savedBreadcrumbs`) inspeccionando `config.inspect()` para no sobrescribirlos nunca con los valores del modo retro al reiniciar, y al desactivar restaura al 100% el tema original del usuario, pestañas, breadcrumbs, minimapa, números de línea, cursor y layout de grupo único (`workbench.action.editorLayoutSingle`).
+   - **Resiliencia en instalación/actualización en caliente (Hot-Install)**:
+     - Todas las escrituras en configuración pasan por `safeUpdate(...)` y `toggleRetroMode` respalda el estado en `context.globalState` (`retroMode.enabled`) y memoria (`this.retroEnabledOverride`). Esto evita el error de VS Code `Unable to write to User Settings because sinclairBasic.retroMode.enabled is not a registered configuration` cuando un usuario instala o actualiza la extensión sin haber recargado aún la ventana de VS Code.
    - **Sistema de audio 1:1 del editor +3 BASIC a latencia cero**:
      - **Enter válido**: Al pulsar `Enter`, si la línea no contiene errores de sintaxis, reproduce el tono de confirmación positivo auténtico de 105 ms (`media/sound/zx_click.wav`) y auto-formatea las palabras clave a MAYÚSCULAS protegiendo cadenas y comentarios.
      - **Enter con error**: Si la línea tiene un error de sintaxis (comillas abiertas, falta número de línea en `.bas`, sintaxis inválida, etc.), reproduce el zumbido de advertencia auténtico RASP de 255 ms (`media/sound/zx_error.wav`).
@@ -169,11 +176,10 @@ vscode-sinclair-basic/
      - **Reproductor persistente en memoria**: Emplea instancias pre-cargadas de `System.Media.SoundPlayer` (`$click`, `$err`, `$cursor`) en un único proceso PowerShell en segundo plano en Windows (y `afplay`/`paplay` en macOS/Linux), garantizando latencia 0 ms.
      - **Ajustes configurables en `package.json`**: `sinclairBasic.retroMode.beepOnEnter`, `sinclairBasic.retroMode.beepOnError`, `sinclairBasic.retroMode.beepOnCursor`, `sinclairBasic.retroMode.formatOnEnter`, `sinclairBasic.retroMode.replaceExistingLine` y `sinclairBasic.replaceExistingLineNumber`.
    - **Sustitución de líneas existentes (+3 BASIC)**: Al introducir una línea numerada en Sinclair BASIC (`.bas`), si el número de línea ya existe en otra parte del documento y la sintaxis es correcta, reemplaza automáticamente la línea existente con el nuevo contenido formateado y elimina la línea duplicada donde se escribió, emulando la inserción de sentencias del ZX Spectrum +3 BASIC. Si se introduce únicamente el número de línea (`10` + Enter), elimina la línea 10 del programa.
-   - **Franja inferior +3 BASIC**: En modo retro se abre un webview (`buildBannerHtml`) en un grupo de editor bloqueado y estrecho bajo el editor (entre el editor y el terminal): franja negra con `+3 BASIC` en fuente ZX y las 4 franjas diagonales (rojo, amarillo, verde, cian). Se crea en `openBanner()` y se elimina en `closeBanner()` (restaura `editorLayoutSingle`) al desactivar.
-   - **Cursor 100% normal**: Sin decoraciones ni artefactos artificiales de bloque sobre el cursor del editor.
+   - **Franja inferior +3 BASIC (`buildBannerHtml`)**: En modo retro abre un webview sin bloquear el grupo de editores en un layout vertical `0.92 / 0.08` (respetando la altura mínima interna de 70px de `EditorGroupView` en VS Code para evitar el auto-maximizado), con la barra negra de 20px `+3 BASIC` pegada abajo (`justify-content: flex-end; padding: 0 18px`) sobre fondo `#D9D9D9` y las 4 franjas diagonales completas sin recortes (`padding-left: 14px`: rojo `#D8240F`, amarillo `#D8D800`, verde `#00D824`, cian `#00D8D8`).
 
 7. **Automated Tests**:
-   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 133 passing tests.
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 136 passing tests.
 
 ---
 
@@ -214,3 +220,8 @@ When you open this project in VS Code, here is what is ready to be done:
 6. **Compilación directa .bas a .tap es estrictamente 1:1**:
    - Cuando se compila directamente un fichero `.bas` a `.tap`, la conversión es **estrictamente 1:1**: se respetan con total fidelidad los números de línea originales, comentarios `REM`, variables y espacios tal cual los escribió el programador.
    - Si el programador incluyó comodines de control de `bas2tap` dentro de cadenas (`{PAPER n}`, `{INK n}`, `{AT y, x}`, etc.), `tapGenerator` los tokeniza a sus bytes correspondientes en la cinta. Ninguna optimización intrusiva (como eliminación de comentarios o re-numeración) se aplica a un archivo `.bas`, ya que esas tareas pertenecen exclusivamente al flujo de preprocesado de `jbas2bas`.
+7. **Documentar SIEMPRE absolutamente todo lo que hagamos (`AGENTS.md` y `README.md`)**:
+   - Es obligatorio mantener `AGENTS.md` (y `.cursorrules` / `README.md` cuando aplique) actualizado en todo momento con cada cambio de código, decisión de arquitectura, corrección de errores, ajuste visual o nuevo flujo de trabajo antes de dar por finalizada cualquier tarea.
+8. **Ejecución de Git y empaquetado desde Linux / WSL (`build.sh` y `wsl git`)**:
+   - El script `build.sh` en la raíz del proyecto permite ejecutar tests (`./build.sh test`), empaquetar `.vsix` (`./build.sh package`), instalar localmente (`./build.sh install`) y publicar en el Marketplace (`./build.sh publish`) desde Linux/WSL.
+   - Para hacer `git commit` o `git push` (que requieren la clave firmada del usuario), **dar siempre el comando listo para copiar y pegar sin intentar ejecutarlo automáticamente**, para que el usuario lo lance directamente en su consola.

@@ -270,7 +270,7 @@
       },
       {
         "command": "sinclairBasic.toggleRetroMode",
-        "title": "Toggle Retro Mode (Spectrum 48K)",
+        "title": "Toggle Retro Mode",
         "category": "Sinclair BASIC",
         "icon": "$(sparkle)"
       }

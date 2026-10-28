@@ -1,6 +1,6 @@
-﻿# AI Agent Context & Guidelines (AGENTS.md)
+# AI Agent Context & Guidelines (AGENTS.md)
 
-Welcome! This document provides complete context for any AI agent working on the **Sinclair BASIC (Unofficial)** VS Code Extension (`vscode-sinclair-basic`).
+Welcome! This document provides complete context for any AI agent working on the **Sinclair BASIC** VS Code Extension (`vscode-sinclair-basic`).
 
 ---
 
@@ -9,7 +9,7 @@ Welcome! This document provides complete context for any AI agent working on the
 * **Origin**: This extension was extracted and modularized from the `Dino BASIC` project (a Sinclair ZX Spectrum game written in Sinclair BASIC / `.jbas`).
 * **Motivation**: Instead of having project-specific scripts (`run_fuse.ps1`, local Python/Node scripts, custom tasks), we created an official-feeling, standalone Visual Studio Code extension to give the entire Sinclair BASIC community a modern development experience (IDE).
 * **Target Audience**: Retro programmers creating software and games for the **Sinclair ZX Spectrum** family (16K, 48K, 128K, +2, +3, Next).
-* **Identity**: The extension is named **Sinclair BASIC (Unofficial)** (`sinclair-basic`) to maximize discoverability while strictly respecting trademark neutrality (clear disclaimer included).
+* **Identity**: The extension is named **Sinclair BASIC** (`sinclair-basic`) to maximize discoverability while strictly respecting trademark neutrality (clear disclaimer included).
 
 ---
 
@@ -51,19 +51,51 @@ vscode-sinclair-basic/
 |-- language-configuration-bas.json      # Brackets, auto-closing & folding for .bas
 |-- language-configuration-jbas.json     # Plegado y comentarios para .jbas
 |-- src/
-|   |-- extension.js                     # VS Code Extension entry point & command registrations
+|   |-- extension.js                     # VS Code Desktop Extension entry point
+|   |-- webExtension.js                  # VS Code Web Extension entry point (vscode.dev / github.dev)
 |   +-- core/
 |       |-- renumber.js                  # Core engine: Sinclair BASIC line renumbering & jump target updates
-|       +-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
+|       |-- jbas2bas.js                  # Core engine: .jbas compiler to standard numbered .bas
+|       |-- tapGenerator.js              # Core engine: Native Pure JS ZX Spectrum .tap generator
+|       |-- tapDecoder.js                # Core engine: ZX Spectrum .tap decoder to Sinclair BASIC (.bas) and .jbas
+|       |-- bas2jbas.js                  # Core engine: Converts numbered Sinclair BASIC (.bas) to modern .jbas with @labels
+|       |-- wildcards.js                 # Core engine: Translates bas2tap wildcards to standard Sinclair BASIC CHR$
+|       |-- folding.js                   # Core engine: Subroutine folding range provider for standard .bas (GO SUB -> RETURN)
+|       |-- definitions.js               # Core engine: Jump target detector & Go to Definition (Ctrl+Click) for standard .bas
+|       |-- share.js                     # Core engine: TAP upload & Turbo80.com shareable web link generator
+|       |-- keywords.js                  # Core metadata: Sinclair BASIC keyword definitions, docs & snippets
+|       |-- formatter.js                 # Core engine: Uppercase keyword formatter with string & comment protection
+|       |-- completions.js               # Autocompletion provider logic for Sinclair BASIC & JBAS
+|       |-- retroMode.js                 # Core engine: ZX Spectrum 48K retro mode (keyclick beep, auto-format, editor Paper 7 & 8x8 font)
+|       |-- debugger.js                  # Core engine: ZX Spectrum 48K statement dispatcher (0x1B3D) & RAM variable decoder
+|       +-- turbo80Html.js               # Shared Webview HTML template with integrated Turbo80 runtime & debug UI
+|-- media/
+|   |-- fonts/
+|   |   +-- ZXSpectrum.ttf               # Authentic ZX Spectrum 48K TrueType pixel font
+|   +-- turbo80/                         # Offline Turbo80 emulator files
+|-- dist/
+|   +-- webExtension.js                  # Bundled single-file web extension (built via esbuild)
 |-- test/
 |   |-- fixtures/
 |   |   +-- sample.bas                   # Test fixture with jump matrix
 |   |-- renumber.test.js                 # Unit tests for renumbering engine
-|   +-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
+|   |-- jbas2bas.test.js                 # Unit tests for jbas transpiler engine
+|   |-- tapGenerator.test.js             # Unit tests for pure JS tap generator
+|   |-- tapDecoder.test.js               # Unit tests for TAP decoder and detokenizer
+|   |-- bas2jbas.test.js                 # Unit tests for BAS to JBAS converter
+|   |-- wildcards.test.js                # Unit tests for wildcard to CHR$ translator
+|   |-- folding.test.js                  # Unit tests for .bas subroutine folding range provider
+|   |-- definitions.test.js              # Unit tests for .bas jump target Go to Definition provider
+|   |-- share.test.js                    # Unit tests for Turbo80 share engine
+|   |-- formatter.test.js                # Unit tests for uppercase keyword formatter
+|   |-- retroMode.test.js                # Unit tests for retro mode cursor detector and sound beeper
+|   |-- completions.test.js              # Unit tests for autocompletion provider
+|   +-- debugger.test.js                 # Unit tests for Sinclair BASIC debugger engine
+|-- build.sh                             # Linux / WSL interactive builder, VSIX packager & Marketplace publisher
+|-- build.bat                            # Windows interactive builder, VSIX packager & Marketplace publisher
 |-- AGENTS.md                            # Complete AI instructions (this file)
-|-- GEMINI.md                            # Mirrored AI instructions for Gemini / Antigravity
 |-- README.md                            # User-facing documentation & quickstart
-|-- LICENSE                              # MIT License
+|-- LICENSE                              # GNU AGPL v3 License (Copyright Raül Torralba & Turbo80 attribution)
 +-- package.json                         # Extension manifest, language definitions & configuration schema
 ```
 
@@ -79,19 +111,75 @@ vscode-sinclair-basic/
 
 2. **jbas Transpiler (`src/core/jbas2bas.js`)**:
    - 2-pass compiler:
-     - Pass 1: Strips `'` comments, ignores blank lines, collects `@label:` targets, assigns sequential numbers.
+     - Pass 1: Strips `'` comments or converts to `: REM`, ignores blank lines, collects `@label:` targets, assigns sequential numbers.
      - Pass 2: Substitutes `@label` references outside strings with mapped line numbers.
    - Detects and reports undefined labels and duplicate definitions.
+   - Smart whitespace compaction (`compactWhitespaceOutsideStrings`): For the compact optimal build (`dist/<filename>.bas`), strips redundant spaces around operators (`=`, `+`, `-`, `*`, `/`, `^`, `<`, `>`, `<=`, `>=`, `<>`, `(`, `)`, `,`, `;`, `:`), preserving spaces inside string literals and `REM` comments while keeping `step10` readable.
+   - **Attribute & String Constant Optimization (`optimizeAttributesAndStrings`)**: Configurable vía `sinclairBasic.optimizePrintAttributes` (activado por defecto). Permite al programador escribir código Sinclair BASIC 100% estándar y natural (ej. `PRINT AT 10, 1; PAPER 2; "HOLA"`). El transpilador absorbe automáticamente las coordenadas y modificadores de color constantes en la cadena (`PRINT "{AT 10,1}{PAPER 2}HOLA"`), reduciendo llamadas al intérprete en la ROM del Spectrum. También pliega automáticamente cadenas concatenadas de `CHR$` constantes (`CHR$ 17 + CHR$ 4 + " "` -> `"{PAPER 4} "`).
+   - **ZX Spectrum ROM `0x0D` (Enter) Safeguard**: Row 13 or Column 13 in `AT row, col` are strictly NEVER absorbed into string literals (e.g. `PRINT AT 13, 7; "{PAPER 7} "`). In the ZX Spectrum ROM, byte `13` (`0x0D`) is the line terminator (`Enter`). If byte 13 appears inside string literals within program lines, the ROM parser thinks the line ended before the closing quote and halts with error `C Nonsense in BASIC`.
+   - **Subroutine Headers in Documented Version (`REM SUB <Title>`)**: En la versión documentada (`dist/<filename>-comments.bas`), cada etiqueta `@label:` genera encima de su rutina una cabecera numerada `REM SUB <Nombre>` convertida automáticamente a Title Case (ej. `@game_over:` -> `REM SUB Game Over`, `@actualizarMarcadorYDificultad:` -> `REM SUB Actualizar Marcador Y Dificultad`). Las llamadas (`GO SUB`, `GO TO`, etc.) mapean limpiamente a la cabecera, integrándose con `folding.js` y Go to Definition sin impactar en absoluto a la versión de producción compacta `dist/<filename>.bas`.
 
-3. **VS Code Extension Integration (`src/extension.js`)**:
-   - `sinclairBasic.renumber`: Renumbers lines directly in active editor with undo/redo support (`editor.edit`).
-   - `sinclairBasic.compileJBas`: Compiles `.jbas` to `dist/<filename>.bas` and opens it in editor side-by-side.
-   - `sinclairBasic.buildTap`: Compiles `.bas` or `.jbas` to `dist/<filename>.tap` via `bas2tap`.
-   - `sinclairBasic.runEmulator`: Builds TAP and launches configured emulator.
-   - Context menus in editor and play button in editor title bar.
+3. **Pure JavaScript TAP Generator (`src/core/tapGenerator.js`)**:
+   - Native Sinclair BASIC tokenizer and ZX Spectrum `.tap` generator written in pure JS.
+   - Encodes Sinclair BASIC token bytes (0x80-0xFF), ZX Spectrum floating-point numbers, UDGs, and line lengths.
+   - Full support for `bas2tap` control escape sequences inside string literals: `{PAPER n}`, `{INK n}`, `{FLASH n}`, `{BRIGHT n}`, `{INVERSE n}`, `{OVER n}`, `{AT y, x}`, `{TAB x}`, `{CODE n}`, `{#HH}`, and `\xHH`.
+   - Exact whitespace parity with `bas2tap`: Automatically consumes trailing spaces after keywords/tokens, `:` statement separators, and `REM` to prevent double spaces when listed on the ZX Spectrum ROM (e.g. `LET py=0` and `CHR$ 18`).
+   - Zero external binary requirements (no `bas2tap.exe` needed by default).
 
-4. **Automated Tests**:
-   - Running with `npm test` (`node --test test/*.test.js`). 11 passing tests.
+4. **Integrated Web Emulator: Turbo80 (`src/extension.js` & `media/turbo80/`)**:
+   - Integrated VS Code Webview embedding [Turbo80](https://turbo80.com) (by José Enrique García (Incinerator)).
+   - **100% Offline Capability**: Packaged locally with `media/turbo80/turbo80.js` and `media/turbo80/turbo80-core.js` for standalone operation without requiring an internet connection.
+   - ROMs for Sinclair 16K/48K/128K and Amstrad +2/+3 are embedded under permissions granted by Amstrad to retrocomputing emulators. Timex ROM changes are in public domain; +D and DISCiPLE under Datel permission; esxDOS under Papaya Dezign permission.
+   - Passes the generated `.tap` file directly via memory/base64 without uploading to external servers.
+   - Authentic audio, CRT shader effects, 48K/128K machine models, and on-screen keyboard.
+   - Explicit attribution footer in the Webview: `Emulado con Turbo80 — Emulador de ZX Spectrum por José Enrique García (Incinerator)`.
+   - Allows falling back to external desktop emulators (Fuse, etc.) if configured.
+
+5. **VS Code Extension Integration (`src/extension.js` & `src/webExtension.js`)**:
+   - `sinclairBasic.compileJBas`: Transpila `.jbas` generando las versiones en `dist/` (incluyendo `dist/<filename>.sinclair.bas` con wildcards traducidos a `CHR$`) y compila **exclusivamente la versión óptima (1 en 1 sin comentarios y compactada: `dist/<filename>.bas`)** en `dist/<filename>.tap` (`Ctrl+Shift+B`).
+   - `sinclairBasic.transpileJBas`: Transpila `.jbas` generando 4 versiones en `dist/`:
+     1. `dist/<filename>.bas`: Líneas 1 a 1, sin comentarios y con espacios de operadores compactados (máxima optimización para cinta y RAM del Spectrum).
+     2. `dist/<filename>-step10.bas`: Líneas de 10 en 10, sin comentarios (versión estándar para desarrollo y lectura).
+     3. `dist/<filename>-comments.bas`: Líneas de 10 en 10, con comentarios convertidos a `REM` y cabeceras de subrutina automáticas `REM SUB <Nombre>` para cada etiqueta `@label:` (versión documentada).
+     4. `dist/<filename>.sinclair.bas`: Líneas de 10 en 10, con todos los wildcards de `bas2tap` (`{PAPER n}`, `{AT y, x}`, etc.) traducidos a llamadas estándar `CHR$` de Sinclair BASIC.
+     Abre `dist/<filename>-step10.bas` en el editor sin generar TAP (`Ctrl+Shift+T`).
+   - `sinclairBasic.compileBas` / `sinclairBasic.buildTap`: Compila `.bas` a `dist/<filename>.tap` nativamente y genera `dist/<filename>.sinclair.bas` (`Ctrl+Shift+B`).
+   - `sinclairBasic.formatKeywords`: Formatea el documento o la selección activa convirtiendo todas las palabras clave de Sinclair BASIC a MAYÚSCULAS (`Shift+Alt+F`).
+   - `sinclairBasic.renumber` / `sinclairBasic.renumberBas`: Renumbra líneas directamente en el editor activo con actualización de saltos y soporte de undo/redo (`Ctrl+Alt+R`).
+   - `sinclairBasic.runEmulator`: Construye el TAP óptimo y lanza el emulador Turbo80 con foco automático (`Ctrl+F5`).
+   - `sinclairBasic.runTurbo80`: Lanza explícitamente el Webview de Turbo80 con foco automático.
+   - `sinclairBasic.runExternalEmulator`: Lanza explícitamente el emulador de escritorio configurado (ej. Fuse).
+   - `sinclairBasic.shareTurbo80`: Compila `.bas` o `.jbas` a `.tap` (o usa cualquier `.tap` existente), lo aloja automáticamente en Catbox y genera un enlace listo para jugar en `https://turbo80.com/?load=...` copiado al portapapeles.
+   - `basFoldingProvider`: Provider semántico de plegado (`FoldingRangeProvider`) exclusivo para Sinclair BASIC estándar (`.bas`). Detecta llamadas `GO SUB <line>` / `GOSUB <line>` (incluyendo dianas múltiples como `ON x GOSUB 100, 200`) y pliega el cuerpo de la subrutina desde la línea de definición hasta su sentencia `RETURN`, protegiendo cadenas y comentarios `REM`. No interfiere en absoluto con `.jbas`.
+   - `basDefinitionProvider`: Provider de navegación Go to Definition (`DefinitionProvider`) exclusivo para Sinclair BASIC estándar (`.bas`). Permite hacer `Ctrl+Click` (o pulsar `F12`) en el número de línea tras un salto (`GO SUB`, `GOSUB`, `GO TO`, `GOTO`, `RUN`, `RESTORE`, o saltos múltiples `ON x GO SUB 100, 200`) para saltar de inmediato a la definición de esa línea en el código.
+   - `sinclairBasic.debugTurbo80`: Depurador interactivo paso a paso integrado con la **barra flotante y paneles nativos de depuración de VS Code (DAP - Debug Adapter Protocol)**. Intercepta el despachador de sentencias de la ROM del 48K (`0x1B3D`) mediante condiciones de punto de interrupción nativas en Turbo80 (`spectrum.bpConds`), permitiendo ejecución a 50 FPS sin sobrecarga hasta alcanzar un breakpoint o paso. Se controla directamente desde la **barra nativa flotante de VS Code** (`F5` Iniciar/Continuar, `F6` Pausar, `F10` Paso de línea / Step Over, `F11` Paso de sentencia / Step Into, `Ctrl+Shift+F5` Reiniciar, `Shift+F5` Detener) y puebla en tiempo real la pestaña **Variables** (VARS en RAM: floats de 5 bytes, cadenas y FOR) y la **Pila de llamadas** (Call Stack) nativas de VS Code. La ventana del emulador se mantiene 100% limpia sin botones apretujados, enfocada en la pantalla auténtica del ZX Spectrum.
+   - **Tabla de equivalencia y Source Mapping `.jbas` <-> `.bas`**: Cuando se depura desde un archivo `.jbas`, el transpilador genera la tabla de equivalencia numérica línea a línea (`basicToSource` y `sourceToBasic`: números enteros 1-a-1). Los breakpoints puestos en el `.jbas` se traducen automáticamente a las líneas reales del `.bas` compilado en la cinta TAP del emulador (incluyendo escaneo hacia adelante en comentarios o líneas en blanco), y cuando el emulador se pausa en cualquier línea/sentencia, VS Code resalta la línea y sentencia exacta en el documento `.jbas` activo y puebla la pila de llamadas nativa con el archivo `.jbas`. Si se depura desde un `.bas`, la correspondencia se mantiene 100% directa en `.bas`.
+   - **Puntos de interrupción por sentencia (Inline Breakpoints)**: Soporte completo para breakpoints en sentencias individuales dentro de una misma línea (`LET a=1: LET b=2`). Compatible con `Shift+F9` (Punto de interrupción de columna / Inline Breakpoint en VS Code), clic en glyphs internos o pulsando `F9` con el cursor sobre la sentencia concreta. Turbo80 evalúa en ROM 48K (`0x1B3D`) tanto la línea (`PPC` 0x5C45) como el índice de sentencia (`SUBPPC` 0x5C47), deteniéndose exactamente en la sentencia marcada.
+   - `sinclairBasic.importTap` / `sinclairBasic.importTapToBas` / `sinclairBasic.importTapToJBas`: Decodifica archivos de cinta `.tap` extrayendo el programa Sinclair BASIC en versión estándar `.bas` y en versión moderna `.jbas` (con etiquetas `@label:`, comentarios `'`, sin números de línea y con indentación). Permite importar directamente desde el menú contextual del explorador en cualquier archivo `.tap` o desde la paleta de comandos con selector de archivos.
+   - Integración completa en barras de herramientas de editor (`editor/title`), menú contextual del editor (`editor/context`), explorador (`explorer/context`) y paleta de comandos.
+
+6. **ZX Spectrum +3 BASIC Retro Mode (`src/core/retroMode.js`)**:
+   - `sinclairBasic.toggleRetroMode`: Conmutador simple (switch ON/OFF) sin temas intrusivos ni popups molestos.
+   - **Pantalla auténtica Paper 7 / Border 7 (`#D9D9D9`) y cursor de bloque azul (`#2A2AF0`)**: Vía `workbench.colorCustomizations`, convierte el fondo del editor y el borde de grupo (`editorGroup.border`) en el gris claro auténtico de Paper 7 del ZX Spectrum (`#D9D9D9`), tinta en Ink 0 (`#000000`) y cursor en bloque sólido azul (`#2A2AF0`, `cursorStyle: 'block'`), uniendo visualmente sin costuras el editor superior y la franja inferior `+3 BASIC`.
+   - **Tipografía auténtica ZX Spectrum 8x8 ampliada y en negrita (Bold)**: Aplica la fuente oficial `ZX Spectrum Unicode` a 19px en negrita (`bold`) exclusivamente en ficheros `.bas` y `.jbas`.
+   - **Sin distracciones**: Oculta automáticamente los números de línea del editor (en Sinclair BASIC las líneas ya están numeradas en el propio código), oculta las pestañas (`showTabs: 'none'`), las migas de pan (`breadcrumbs.enabled: false`), el minimapa y pliega el panel inferior para emular la pantalla completa del ZX Spectrum +3.
+   - **Rollback 100% garantizado incluso tras cerrar y reabrir VS Code**:
+     - Registra `onStartupFinished` en `package.json` y un `WebviewPanelSerializer` (`sinclairBasicBanner`) que descarta automáticamente cualquier webview fantasma en blanco si VS Code se cerró con el modo retro activado.
+     - Mantiene siempre visible el botón `$(sparkle) ZX Retro: ON` en la barra de estado mientras el modo retro esté activo (aunque no haya ningún fichero `.bas` enfocado) para que el usuario pueda desactivarlo en cualquier momento.
+     - Guarda en `context.globalState` los valores originales del usuario (`savedTheme`, `savedShowTabs`, `savedBreadcrumbs`) inspeccionando `config.inspect()` para no sobrescribirlos nunca con los valores del modo retro al reiniciar, y al desactivar restaura al 100% el tema original del usuario, pestañas, breadcrumbs, minimapa, números de línea, cursor y layout de grupo único (`workbench.action.editorLayoutSingle`).
+   - **Resiliencia en instalación/actualización en caliente (Hot-Install)**:
+     - Todas las escrituras en configuración pasan por `safeUpdate(...)` y `toggleRetroMode` respalda el estado en `context.globalState` (`retroMode.enabled`) y memoria (`this.retroEnabledOverride`). Esto evita el error de VS Code `Unable to write to User Settings because sinclairBasic.retroMode.enabled is not a registered configuration` cuando un usuario instala o actualiza la extensión sin haber recargado aún la ventana de VS Code.
+   - **Sistema de audio 1:1 del editor +3 BASIC a latencia cero**:
+     - **Enter válido**: Al pulsar `Enter`, si la línea no contiene errores de sintaxis, reproduce el tono de confirmación positivo auténtico de 105 ms (`media/sound/zx_click.wav`) y auto-formatea las palabras clave a MAYÚSCULAS protegiendo cadenas y comentarios.
+     - **Enter con error**: Si la línea tiene un error de sintaxis (comillas abiertas, falta número de línea en `.bas`, sintaxis inválida, etc.), reproduce el zumbido de advertencia auténtico RASP de 255 ms (`media/sound/zx_error.wav`).
+     - **Movimiento de cursor**: Al navegar con las flechas o cambiar de selección, emite el clic auténtico de teclado de 22 ms (`media/sound/zx_cursor.wav`), con estrangulamiento (throttle) a 55 ms emulando la tasa de repetición real del Spectrum sin saturar.
+     - **Reproductor persistente en memoria**: Emplea instancias pre-cargadas de `System.Media.SoundPlayer` (`$click`, `$err`, `$cursor`) en un único proceso PowerShell en segundo plano en Windows (y `afplay`/`paplay` en macOS/Linux), garantizando latencia 0 ms.
+     - **Ajustes configurables en `package.json`**: `sinclairBasic.retroMode.beepOnEnter`, `sinclairBasic.retroMode.beepOnError`, `sinclairBasic.retroMode.beepOnCursor`, `sinclairBasic.retroMode.formatOnEnter`, `sinclairBasic.retroMode.replaceExistingLine` y `sinclairBasic.replaceExistingLineNumber`.
+   - **Sustitución de líneas existentes (+3 BASIC)**: Al introducir una línea numerada en Sinclair BASIC (`.bas`), si el número de línea ya existe en otra parte del documento y la sintaxis es correcta, reemplaza automáticamente la línea existente con el nuevo contenido formateado y elimina la línea duplicada donde se escribió, emulando la inserción de sentencias del ZX Spectrum +3 BASIC. Si se introduce únicamente el número de línea (`10` + Enter), elimina la línea 10 del programa.
+   - **Franja inferior +3 BASIC (`buildBannerHtml`)**: En modo retro abre un webview sin bloquear el grupo de editores en un layout vertical `0.92 / 0.08` (respetando la altura mínima interna de 70px de `EditorGroupView` en VS Code para evitar el auto-maximizado), con la barra negra de 20px `+3 BASIC` pegada abajo (`justify-content: flex-end; padding: 0 18px`) sobre fondo `#D9D9D9` y las 4 franjas diagonales completas sin recortes (`padding-left: 14px`: rojo `#D8240F`, amarillo `#D8D800`, verde `#00D824`, cian `#00D8D8`).
+
+7. **Automated Tests**:
+   - Running with `npm test` (`node -c src/extension.js && node -c src/webExtension.js && npm run build-web && node --test test/*.test.js`). 136 passing tests.
 
 ---
 
@@ -102,7 +190,7 @@ When you open this project in VS Code, here is what is ready to be done:
 1. **Manual F5 Smoke Test in Extension Development Host**:
    - Press `F5` in VS Code to launch the Extension Development Host.
    - Open a `.bas` file -> verify highlighting and run `Sinclair BASIC: Renumber Lines`.
-   - Open a `.jbas` file -> verify highlighting, run `Sinclair BASIC: Compile .jbas`, `Build TAP`, and `Run in Emulator`.
+   - Open a `.jbas` file -> verify highlighting, run `Sinclair BASIC: Transpile .jbas to .bas` (genera las 3 versiones en `dist/`), `Build TAP`, and `Run in Emulator`.
 2. **TypeScript / Type Declarations**:
    - Currently written in modern Node.js CommonJS for zero-build speed.
    - You can add `npm install --save-dev @types/vscode` if you want VS Code API autocomplete in `src/extension.js`.
@@ -123,3 +211,17 @@ When you open this project in VS Code, here is what is ready to be done:
    - Never alter text inside `"double quotes"` or after `REM` comments.
 3. **Keep core pure**:
    - `src/core/renumber.js` and `src/core/jbas2bas.js` must remain pure JavaScript without VS Code API dependencies so they can be run in CLI, web, or automated test runners.
+4. **Compilación de TAP desde .jbas (siempre versión óptima)**:
+   - Para compilar a imagen de cinta `.tap` desde un fichero `.jbas`, se compilan las 3 versiones y se usa SIEMPRE la versión más óptima: **líneas de 1 en 1, sin comentarios y con compactación de espacios en operadores** (`dist/<filename>.bas`).
+   - Esto minimiza drásticamente los bytes en la cinta, reduce el consumo de memoria RAM en el ZX Spectrum y agiliza la velocidad de ejecución del intérprete de Sinclair BASIC al evitar saltar sobre o procesar líneas de comentarios `REM`.
+5. **NUNCA emitir byte 13 (0x0D) dentro de cadenas literales de Sinclair BASIC**:
+   - El byte `13` (`0x0D`) es el carácter de salto de línea / `ENTER` en la ROM del Sinclair ZX Spectrum.
+   - Si un literal de cadena en una línea contiene el byte 13 (por ejemplo, `{AT 13, col}` o `{CODE 13}`), el analizador de la ROM cree que la línea ha terminado antes de cerrar las comillas y aborta con el error `C Nonsense in BASIC`. Por tanto, `AT 13, col` y `AT row, 13` se deben mantener siempre en sintaxis estándar de Sinclair BASIC fuera de las comillas.
+6. **Compilación directa .bas a .tap es estrictamente 1:1**:
+   - Cuando se compila directamente un fichero `.bas` a `.tap`, la conversión es **estrictamente 1:1**: se respetan con total fidelidad los números de línea originales, comentarios `REM`, variables y espacios tal cual los escribió el programador.
+   - Si el programador incluyó comodines de control de `bas2tap` dentro de cadenas (`{PAPER n}`, `{INK n}`, `{AT y, x}`, etc.), `tapGenerator` los tokeniza a sus bytes correspondientes en la cinta. Ninguna optimización intrusiva (como eliminación de comentarios o re-numeración) se aplica a un archivo `.bas`, ya que esas tareas pertenecen exclusivamente al flujo de preprocesado de `jbas2bas`.
+7. **Documentar SIEMPRE absolutamente todo lo que hagamos (`AGENTS.md` y `README.md`)**:
+   - Es obligatorio mantener `AGENTS.md` (y `.cursorrules` / `README.md` cuando aplique) actualizado en todo momento con cada cambio de código, decisión de arquitectura, corrección de errores, ajuste visual o nuevo flujo de trabajo antes de dar por finalizada cualquier tarea.
+8. **Ejecución de Git y empaquetado desde Linux / WSL (`build.sh` y `wsl git`)**:
+   - El script `build.sh` en la raíz del proyecto permite ejecutar tests (`./build.sh test`), empaquetar `.vsix` (`./build.sh package`), instalar localmente (`./build.sh install`) y publicar en el Marketplace (`./build.sh publish`) desde Linux/WSL.
+   - Para hacer `git commit` o `git push` (que requieren la clave firmada del usuario), **dar siempre el comando listo para copiar y pegar sin intentar ejecutarlo automáticamente**, para que el usuario lo lance directamente en su consola.
