@@ -2914,9 +2914,8 @@ var require_debugger = __commonJS({
     var ROM48_LOOP_ADDR = 6953;
     function decodeSinclairFloat(b0, b1, b2, b3, b4) {
       if (b0 === 0) {
-        const sign = b1 === 255 ? -1 : 1;
         const val2 = b2 & 255 | (b3 & 255) << 8;
-        return sign * val2;
+        return b1 === 255 ? val2 - 65536 : val2;
       }
       const exp = b0 - 128;
       const mant = (b1 & 127 | 128) * 16777216 + (b2 & 255) * 65536 + (b3 & 255) * 256 + (b4 & 255);
@@ -3918,9 +3917,8 @@ var require_turbo80Html = __commonJS({
 
     function decodeSinclairFloat(b0, b1, b2, b3, b4) {
       if (b0 === 0) {
-        const sign = (b1 === 0xFF) ? -1 : 1;
         const val = (b2 & 0xFF) | ((b3 & 0xFF) << 8);
-        return sign * val;
+        return (b1 === 0xFF) ? (val - 0x10000) : val;
       }
       const exp = b0 - 128;
       const mant = (((b1 & 0x7F) | 0x80) * 0x1000000) +

@@ -26,8 +26,10 @@ describe('Sinclair BASIC Debugger Engine', () => {
       assert.strictEqual(decodeSinclairFloat(0, 0, 0, 0, 0), 0);
       // 42 = 00 00 2A 00 00
       assert.strictEqual(decodeSinclairFloat(0, 0, 42, 0, 0), 42);
-      // -100 = 00 FF 64 00 00
-      assert.strictEqual(decodeSinclairFloat(0, 0xFF, 100, 0, 0), -100);
+      // -1 = 00 FF FF FF 00 (two's complement: 65536 - 1 = 0xFFFF)
+      assert.strictEqual(decodeSinclairFloat(0, 0xFF, 0xFF, 0xFF, 0), -1);
+      // -100 = 00 FF 9C FF 00 (two's complement: 65536 - 100 = 65436 = 0xFF9C)
+      assert.strictEqual(decodeSinclairFloat(0, 0xFF, 0x9C, 0xFF, 0), -100);
       // 1000 = 00 00 E8 03 00
       assert.strictEqual(decodeSinclairFloat(0, 0, 0xE8, 0x03, 0), 1000);
     });

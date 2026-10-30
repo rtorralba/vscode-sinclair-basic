@@ -25,9 +25,8 @@ const ROM48_LOOP_ADDR = 0x1B29;
  */
 function decodeSinclairFloat(b0, b1, b2, b3, b4) {
   if (b0 === 0) {
-    const sign = (b1 === 0xFF) ? -1 : 1;
     const val = (b2 & 0xFF) | ((b3 & 0xFF) << 8);
-    return sign * val;
+    return (b1 === 0xFF) ? (val - 0x10000) : val;
   }
   const exp = b0 - 128;
   const mant = (((b1 & 0x7F) | 0x80) * 0x1000000) +
