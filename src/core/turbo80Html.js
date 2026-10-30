@@ -370,6 +370,17 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       return res;
     }
 
+    function indexToSubscripts(idx, dims) {
+      const subs = new Array(dims.length);
+      let rem = idx;
+      for (let d = dims.length - 1; d >= 0; d--) {
+        const size = dims[d] || 1;
+        subs[d] = (rem % size) + 1;
+        rem = Math.floor(rem / size);
+      }
+      return subs;
+    }
+
     function readSpectrumVariables(readByte) {
       const varsStart = (readByte(0x5C4B) & 0xFF) | ((readByte(0x5C4C) & 0xFF) << 8);
       const vars = [];
@@ -419,14 +430,115 @@ function getTurbo80Html(webview, extensionUri, vscode) {
           const val = decodeSinclairFloat(
             readByte(p + 1), readByte(p + 2), readByte(p + 3), readByte(p + 4), readByte(p + 5)
           );
-          vars.push({ name, type: 'for', value: val });
+          const limit = decodeSinclairFloat(
+            readByte(p + 6), readByte(p + 7), readByte(p + 8), readByte(p + 9), readByte(p + 10)
+          );
+          const step = decodeSinclairFloat(
+            readByte(p + 11), readByte(p + 12), readByte(p + 13), readByte(p + 14), readByte(p + 15)
+          );
+          const loopLine = (readByte(p + 16) & 0xFF) | ((readByte(p + 17) & 0xFF) << 8);
+          const loopStmt = readByte(p + 18) & 0xFF;
+          vars.push({ name, type: 'for', value: val, limit: limit, step: step, loopLine: loopLine, loopStmt: loopStmt });
           p += 19;
         } else if (type === 4 || type === 6) {
           const isString = (type === 6);
           const name = String.fromCharCode(96 + letterCode) + (isString ? '$' : '');
           const len = (readByte(p + 1) & 0xFF) | ((readByte(p + 2) & 0xFF) << 8);
-          vars.push({ name, type: isString ? 'string-array' : 'number-array', length: len });
-          p += 3 + len;
+          const nextVarAddr = p + 3 + len;
+          const numDims = readByte(p + 3) & 0xFF;
+          const dimensions = [];
+          for (let d = 0; d < numDims && (p + 4 + d * 2 + 1) < nextVarAddr; d++) {
+            const dOff = p + 4 + d * 2;
+            const dSize = (readByte(dOff) & 0xFF) | ((readByte(dOff + 1) & 0xFF) << 8);
+            dimensions.push(dSize);
+          }
+          const dataStart = p + 4 + numDims * 2;
+          const dimStr = dimensions.join(',');
+
+          if (!isString) {
+            const totalElements = dimensions.length > 0
+              ? dimensions.reduce((acc, d) => acc * d, 1)
+              : 0;
+            const maxElements = Math.min(totalElements, 1000);
+            const elements = [];
+            for (let i = 0; i < maxElements; i++) {
+              const elemAddr = dataStart + i * 5;
+              if (elemAddr + 4 >= nextVarAddr || elemAddr + 4 >= maxAddr) break;
+              const elemVal = decodeSinclairFloat(
+                readByte(elemAddr),
+                readByte(elemAddr + 1),
+                readByte(elemAddr + 2),
+                readByte(elemAddr + 3),
+                readByte(elemAddr + 4)
+              );
+              const subs = indexToSubscripts(i, dimensions);
+              elements.push({ index: subs.join(','), value: elemVal });
+            }
+            const preview = elements.slice(0, 8).map(e => e.value).join(', ')
+              + (totalElements > 8 ? ', ...' : '');
+            const value = 'DIM(' + dimStr + ') [' + preview + ']';
+            vars.push({
+              name,
+              type: 'number-array',
+              value,
+              length: len,
+              dimensions,
+              elements
+            });
+          } else {
+            if (dimensions.length === 1) {
+              const charLen = dimensions[0] || 0;
+              const maxChars = Math.min(charLen, 1000);
+              const rawBytes = [];
+              for (let i = 0; i < maxChars && (dataStart + i) < nextVarAddr && (dataStart + i) < maxAddr; i++) {
+                rawBytes.push(readByte(dataStart + i));
+              }
+              const strVal = decodeSpectrumString(rawBytes);
+              const value = 'DIM(' + dimStr + ') "' + strVal + '"';
+              vars.push({
+                name,
+                type: 'string-array',
+                value,
+                length: len,
+                dimensions,
+                rawBytes
+              });
+            } else if (dimensions.length >= 2) {
+              const strLen = dimensions[dimensions.length - 1] || 0;
+              const rowDims = dimensions.slice(0, -1);
+              const totalStrings = rowDims.reduce((acc, d) => acc * d, 1);
+              const maxStrings = Math.min(totalStrings, 500);
+              const elements = [];
+              for (let i = 0; i < maxStrings; i++) {
+                const strAddr = dataStart + i * strLen;
+                if (strAddr + strLen > nextVarAddr || strAddr + strLen > maxAddr) break;
+                const rowBytes = [];
+                for (let c = 0; c < strLen; c++) {
+                  rowBytes.push(readByte(strAddr + c));
+                }
+                const subs = indexToSubscripts(i, rowDims);
+                elements.push({
+                  index: subs.join(','),
+                  value: decodeSpectrumString(rowBytes),
+                  rawBytes: rowBytes
+                });
+              }
+              const preview = elements.slice(0, 4).map(e => '"' + e.value + '"').join(', ')
+                + (totalStrings > 4 ? ', ...' : '');
+              const value = 'DIM(' + dimStr + ') [' + preview + ']';
+              vars.push({
+                name,
+                type: 'string-array',
+                value,
+                length: len,
+                dimensions,
+                elements
+              });
+            } else {
+              vars.push({ name, type: 'string-array', value: 'DIM()', length: len, dimensions: [] });
+            }
+          }
+          p = nextVarAddr;
         } else {
           break;
         }

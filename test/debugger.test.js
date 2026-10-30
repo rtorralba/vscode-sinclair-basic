@@ -98,6 +98,70 @@ describe('Sinclair BASIC Debugger Engine', () => {
       assert.deepStrictEqual(vars[2], { name: 'm$', type: 'string', value: 'OK', length: 2, rawBytes: [79, 75] });
     });
 
+    it('reads 1D and 2D numeric and string arrays from Spectrum RAM (e.g. DIM b(4), DIM a$(2,3))', () => {
+      const memory = new Uint8Array(65536);
+      memory[0x5C4B] = 0x00;
+      memory[0x5C4C] = 0x60; // VARS at 0x6000
+
+      let idx = 0x6000;
+      // Numeric array DIM b(3) -> 'b' = letter 2 -> type 4: (4 << 5) | 2 = 0x82
+      // Body length = 1 (numDims) + 2 (dim1) + 3 * 5 (elements) = 18 bytes
+      memory[idx++] = 0x82;
+      memory[idx++] = 18; // len low
+      memory[idx++] = 0;  // len high
+      memory[idx++] = 1;  // 1 dimension
+      memory[idx++] = 3;  // dim1 = 3 (low)
+      memory[idx++] = 0;  // dim1 (high)
+      // b(1) = 10, b(2) = 20, b(3) = 30
+      for (const v of [10, 20, 30]) {
+        memory[idx++] = 0x00;
+        memory[idx++] = 0x00;
+        memory[idx++] = v;
+        memory[idx++] = 0x00;
+        memory[idx++] = 0x00;
+      }
+
+      // 2D String array DIM a$(2, 3) -> 'a' = letter 1 -> type 6: (6 << 5) | 1 = 0xC1
+      // Body length = 1 (numDims) + 4 (dim1=2, dim2=3) + 6 chars = 11 bytes
+      memory[idx++] = 0xC1;
+      memory[idx++] = 11; // len low
+      memory[idx++] = 0;  // len high
+      memory[idx++] = 2;  // 2 dimensions
+      memory[idx++] = 2;  // dim1 = 2 (low)
+      memory[idx++] = 0;  // dim1 (high)
+      memory[idx++] = 3;  // dim2 = 3 (low)
+      memory[idx++] = 0;  // dim2 (high)
+      // a$(1) = "UNO", a$(2) = "DOS"
+      for (const ch of [85, 78, 79, 68, 79, 83]) {
+        memory[idx++] = ch;
+      }
+
+      memory[idx++] = 0x80; // End of VARS
+
+      const vars = readSpectrumVariables((addr) => memory[addr]);
+      assert.strictEqual(vars.length, 2);
+
+      assert.strictEqual(vars[0].name, 'b');
+      assert.strictEqual(vars[0].type, 'number-array');
+      assert.strictEqual(vars[0].value, 'DIM(3) [10, 20, 30]');
+      assert.deepStrictEqual(vars[0].dimensions, [3]);
+      assert.deepStrictEqual(vars[0].elements, [
+        { index: '1', value: 10 },
+        { index: '2', value: 20 },
+        { index: '3', value: 30 }
+      ]);
+
+      assert.strictEqual(vars[1].name, 'a$');
+      assert.strictEqual(vars[1].type, 'string-array');
+      assert.strictEqual(vars[1].value, 'DIM(2,3) ["UNO", "DOS"]');
+      assert.deepStrictEqual(vars[1].dimensions, [2, 3]);
+      assert.strictEqual(vars[1].elements.length, 2);
+      assert.strictEqual(vars[1].elements[0].index, '1');
+      assert.strictEqual(vars[1].elements[0].value, 'UNO');
+      assert.strictEqual(vars[1].elements[1].index, '2');
+      assert.strictEqual(vars[1].elements[1].value, 'DOS');
+    });
+
     it('returns empty array when VARS is empty (starts with 0x80)', () => {
       const memory = new Uint8Array(65536);
       memory[0x5C4B] = 0x00;
@@ -321,6 +385,44 @@ describe('Sinclair BASIC Debugger Engine', () => {
       assert.strictEqual(childVars[0].value, '19  {CODE 19}');
       assert.strictEqual(childVars[6].name, '(7)');
       assert.strictEqual(childVars[6].value, '20  {CODE 20}');
+    });
+
+    it('expands numeric and string arrays in DAP variables request', () => {
+      const responses = [];
+      const adapter = new SinclairBasicDebugAdapterCore({
+        sendEvent: () => {},
+        sendResponse: (r) => responses.push(r),
+        onAction: () => {}
+      });
+
+      adapter.notifyPaused(30, 1, [
+        {
+          name: 'b',
+          type: 'number-array',
+          value: 'DIM(3) [1, 2, 3]',
+          length: 18,
+          dimensions: [3],
+          elements: [
+            { index: '1', value: 1 },
+            { index: '2', value: 2 },
+            { index: '3', value: 3 }
+          ]
+        }
+      ]);
+
+      adapter.handleMessage({ seq: 1, type: 'request', command: 'variables', arguments: { variablesReference: 1000 } });
+      const topVars = responses[0].body.variables;
+      assert.strictEqual(topVars[0].name, 'b');
+      assert.strictEqual(topVars[0].value, 'DIM(3) [1, 2, 3]');
+      assert.strictEqual(topVars[0].variablesReference, 2000);
+
+      adapter.handleMessage({ seq: 2, type: 'request', command: 'variables', arguments: { variablesReference: 2000 } });
+      const childVars = responses[1].body.variables;
+      assert.strictEqual(childVars.length, 3);
+      assert.strictEqual(childVars[0].name, 'b(1)');
+      assert.strictEqual(childVars[0].value, '1');
+      assert.strictEqual(childVars[2].name, 'b(3)');
+      assert.strictEqual(childVars[2].value, '3');
     });
 
     it('dispatches debugger actions: continue, next, stepIn, pause, disconnect', () => {

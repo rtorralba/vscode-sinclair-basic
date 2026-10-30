@@ -2992,6 +2992,16 @@ var require_debugger = __commonJS({
       }
       return res;
     }
+    function indexToSubscripts(idx, dims) {
+      const subs = new Array(dims.length);
+      let rem = idx;
+      for (let d = dims.length - 1; d >= 0; d--) {
+        const size = dims[d] || 1;
+        subs[d] = rem % size + 1;
+        rem = Math.floor(rem / size);
+      }
+      return subs;
+    }
     function readSpectrumVariables(readByte) {
       const varsStart = readByte(23627) & 255 | (readByte(23628) & 255) << 8;
       const vars = [];
@@ -3072,8 +3082,96 @@ var require_debugger = __commonJS({
           const isString = type === 6;
           const name = String.fromCharCode(96 + letterCode) + (isString ? "$" : "");
           const len = readByte(p + 1) & 255 | (readByte(p + 2) & 255) << 8;
-          vars.push({ name, type: isString ? "string-array" : "number-array", length: len });
-          p += 3 + len;
+          const nextVarAddr = p + 3 + len;
+          const numDims = readByte(p + 3) & 255;
+          const dimensions = [];
+          for (let d = 0; d < numDims && p + 4 + d * 2 + 1 < nextVarAddr; d++) {
+            const dOff = p + 4 + d * 2;
+            const dSize = readByte(dOff) & 255 | (readByte(dOff + 1) & 255) << 8;
+            dimensions.push(dSize);
+          }
+          const dataStart = p + 4 + numDims * 2;
+          const dimStr = dimensions.join(",");
+          if (!isString) {
+            const totalElements = dimensions.length > 0 ? dimensions.reduce((acc, d) => acc * d, 1) : 0;
+            const maxElements = Math.min(totalElements, 1e3);
+            const elements = [];
+            for (let i = 0; i < maxElements; i++) {
+              const elemAddr = dataStart + i * 5;
+              if (elemAddr + 4 >= nextVarAddr || elemAddr + 4 >= maxAddr) break;
+              const elemVal = decodeSinclairFloat(
+                readByte(elemAddr),
+                readByte(elemAddr + 1),
+                readByte(elemAddr + 2),
+                readByte(elemAddr + 3),
+                readByte(elemAddr + 4)
+              );
+              const subs = indexToSubscripts(i, dimensions);
+              elements.push({ index: subs.join(","), value: elemVal });
+            }
+            const preview = elements.slice(0, 8).map((e) => e.value).join(", ") + (totalElements > 8 ? ", ..." : "");
+            const value = `DIM(${dimStr}) [${preview}]`;
+            vars.push({
+              name,
+              type: "number-array",
+              value,
+              length: len,
+              dimensions,
+              elements
+            });
+          } else {
+            if (dimensions.length === 1) {
+              const charLen = dimensions[0] || 0;
+              const maxChars = Math.min(charLen, 1e3);
+              const rawBytes = [];
+              for (let i = 0; i < maxChars && dataStart + i < nextVarAddr && dataStart + i < maxAddr; i++) {
+                rawBytes.push(readByte(dataStart + i));
+              }
+              const strVal = decodeSpectrumString(rawBytes);
+              const value = `DIM(${dimStr}) "${strVal}"`;
+              vars.push({
+                name,
+                type: "string-array",
+                value,
+                length: len,
+                dimensions,
+                rawBytes
+              });
+            } else if (dimensions.length >= 2) {
+              const strLen = dimensions[dimensions.length - 1] || 0;
+              const rowDims = dimensions.slice(0, -1);
+              const totalStrings = rowDims.reduce((acc, d) => acc * d, 1);
+              const maxStrings = Math.min(totalStrings, 500);
+              const elements = [];
+              for (let i = 0; i < maxStrings; i++) {
+                const strAddr = dataStart + i * strLen;
+                if (strAddr + strLen > nextVarAddr || strAddr + strLen > maxAddr) break;
+                const rowBytes = [];
+                for (let c = 0; c < strLen; c++) {
+                  rowBytes.push(readByte(strAddr + c));
+                }
+                const subs = indexToSubscripts(i, rowDims);
+                elements.push({
+                  index: subs.join(","),
+                  value: decodeSpectrumString(rowBytes),
+                  rawBytes: rowBytes
+                });
+              }
+              const preview = elements.slice(0, 4).map((e) => `"${e.value}"`).join(", ") + (totalStrings > 4 ? ", ..." : "");
+              const value = `DIM(${dimStr}) [${preview}]`;
+              vars.push({
+                name,
+                type: "string-array",
+                value,
+                length: len,
+                dimensions,
+                elements
+              });
+            } else {
+              vars.push({ name, type: "string-array", value: "DIM()", length: len, dimensions: [] });
+            }
+          }
+          p = nextVarAddr;
         } else {
           break;
         }
@@ -3393,7 +3491,14 @@ var require_debugger = __commonJS({
                     childRef = 2e3 + idx;
                   }
                 } else if (v.type === "for") {
-                  valStr = `${v.value} (TO ${v.limit} STEP ${v.step})`;
+                  const limitStr = v.limit !== void 0 ? v.limit : "?";
+                  const stepStr = v.step !== void 0 ? v.step : 1;
+                  valStr = `${v.value} (TO ${limitStr} STEP ${stepStr})`;
+                } else if (v.type === "number-array" || v.type === "string-array") {
+                  valStr = v.value || `DIM (${v.length} bytes)`;
+                  if (v.elements && v.elements.length > 0 || v.rawBytes && v.rawBytes.length > 0) {
+                    childRef = 2e3 + idx;
+                  }
                 } else {
                   valStr = String(v.value);
                 }
@@ -3411,11 +3516,30 @@ var require_debugger = __commonJS({
               const varIdx = varRef - 2e3;
               const targetVar = this.currentVars && this.currentVars[varIdx];
               const children = [];
-              if (targetVar && targetVar.rawBytes) {
+              if (targetVar && targetVar.type === "number-array" && Array.isArray(targetVar.elements)) {
+                targetVar.elements.forEach((el) => {
+                  children.push({
+                    name: `${targetVar.name}(${el.index})`,
+                    value: String(el.value),
+                    type: "number",
+                    variablesReference: 0
+                  });
+                });
+              } else if (targetVar && targetVar.type === "string-array" && Array.isArray(targetVar.elements)) {
+                targetVar.elements.forEach((el) => {
+                  children.push({
+                    name: `${targetVar.name}(${el.index})`,
+                    value: `"${el.value}"`,
+                    type: "string",
+                    variablesReference: 0
+                  });
+                });
+              } else if (targetVar && targetVar.rawBytes) {
+                const isCharArray = targetVar.type === "string-array";
                 targetVar.rawBytes.forEach((b, i) => {
                   const charDesc = b >= 32 && b <= 126 ? `"${String.fromCharCode(b)}"` : `{CODE ${b}}`;
                   children.push({
-                    name: `(${i + 1})`,
+                    name: isCharArray ? `${targetVar.name}(${i + 1})` : `(${i + 1})`,
                     value: `${b}  ${charDesc}`,
                     type: "CODE",
                     variablesReference: 0
@@ -3878,6 +4002,17 @@ var require_turbo80Html = __commonJS({
       return res;
     }
 
+    function indexToSubscripts(idx, dims) {
+      const subs = new Array(dims.length);
+      let rem = idx;
+      for (let d = dims.length - 1; d >= 0; d--) {
+        const size = dims[d] || 1;
+        subs[d] = (rem % size) + 1;
+        rem = Math.floor(rem / size);
+      }
+      return subs;
+    }
+
     function readSpectrumVariables(readByte) {
       const varsStart = (readByte(0x5C4B) & 0xFF) | ((readByte(0x5C4C) & 0xFF) << 8);
       const vars = [];
@@ -3927,14 +4062,115 @@ var require_turbo80Html = __commonJS({
           const val = decodeSinclairFloat(
             readByte(p + 1), readByte(p + 2), readByte(p + 3), readByte(p + 4), readByte(p + 5)
           );
-          vars.push({ name, type: 'for', value: val });
+          const limit = decodeSinclairFloat(
+            readByte(p + 6), readByte(p + 7), readByte(p + 8), readByte(p + 9), readByte(p + 10)
+          );
+          const step = decodeSinclairFloat(
+            readByte(p + 11), readByte(p + 12), readByte(p + 13), readByte(p + 14), readByte(p + 15)
+          );
+          const loopLine = (readByte(p + 16) & 0xFF) | ((readByte(p + 17) & 0xFF) << 8);
+          const loopStmt = readByte(p + 18) & 0xFF;
+          vars.push({ name, type: 'for', value: val, limit: limit, step: step, loopLine: loopLine, loopStmt: loopStmt });
           p += 19;
         } else if (type === 4 || type === 6) {
           const isString = (type === 6);
           const name = String.fromCharCode(96 + letterCode) + (isString ? '$' : '');
           const len = (readByte(p + 1) & 0xFF) | ((readByte(p + 2) & 0xFF) << 8);
-          vars.push({ name, type: isString ? 'string-array' : 'number-array', length: len });
-          p += 3 + len;
+          const nextVarAddr = p + 3 + len;
+          const numDims = readByte(p + 3) & 0xFF;
+          const dimensions = [];
+          for (let d = 0; d < numDims && (p + 4 + d * 2 + 1) < nextVarAddr; d++) {
+            const dOff = p + 4 + d * 2;
+            const dSize = (readByte(dOff) & 0xFF) | ((readByte(dOff + 1) & 0xFF) << 8);
+            dimensions.push(dSize);
+          }
+          const dataStart = p + 4 + numDims * 2;
+          const dimStr = dimensions.join(',');
+
+          if (!isString) {
+            const totalElements = dimensions.length > 0
+              ? dimensions.reduce((acc, d) => acc * d, 1)
+              : 0;
+            const maxElements = Math.min(totalElements, 1000);
+            const elements = [];
+            for (let i = 0; i < maxElements; i++) {
+              const elemAddr = dataStart + i * 5;
+              if (elemAddr + 4 >= nextVarAddr || elemAddr + 4 >= maxAddr) break;
+              const elemVal = decodeSinclairFloat(
+                readByte(elemAddr),
+                readByte(elemAddr + 1),
+                readByte(elemAddr + 2),
+                readByte(elemAddr + 3),
+                readByte(elemAddr + 4)
+              );
+              const subs = indexToSubscripts(i, dimensions);
+              elements.push({ index: subs.join(','), value: elemVal });
+            }
+            const preview = elements.slice(0, 8).map(e => e.value).join(', ')
+              + (totalElements > 8 ? ', ...' : '');
+            const value = 'DIM(' + dimStr + ') [' + preview + ']';
+            vars.push({
+              name,
+              type: 'number-array',
+              value,
+              length: len,
+              dimensions,
+              elements
+            });
+          } else {
+            if (dimensions.length === 1) {
+              const charLen = dimensions[0] || 0;
+              const maxChars = Math.min(charLen, 1000);
+              const rawBytes = [];
+              for (let i = 0; i < maxChars && (dataStart + i) < nextVarAddr && (dataStart + i) < maxAddr; i++) {
+                rawBytes.push(readByte(dataStart + i));
+              }
+              const strVal = decodeSpectrumString(rawBytes);
+              const value = 'DIM(' + dimStr + ') "' + strVal + '"';
+              vars.push({
+                name,
+                type: 'string-array',
+                value,
+                length: len,
+                dimensions,
+                rawBytes
+              });
+            } else if (dimensions.length >= 2) {
+              const strLen = dimensions[dimensions.length - 1] || 0;
+              const rowDims = dimensions.slice(0, -1);
+              const totalStrings = rowDims.reduce((acc, d) => acc * d, 1);
+              const maxStrings = Math.min(totalStrings, 500);
+              const elements = [];
+              for (let i = 0; i < maxStrings; i++) {
+                const strAddr = dataStart + i * strLen;
+                if (strAddr + strLen > nextVarAddr || strAddr + strLen > maxAddr) break;
+                const rowBytes = [];
+                for (let c = 0; c < strLen; c++) {
+                  rowBytes.push(readByte(strAddr + c));
+                }
+                const subs = indexToSubscripts(i, rowDims);
+                elements.push({
+                  index: subs.join(','),
+                  value: decodeSpectrumString(rowBytes),
+                  rawBytes: rowBytes
+                });
+              }
+              const preview = elements.slice(0, 4).map(e => '"' + e.value + '"').join(', ')
+                + (totalStrings > 4 ? ', ...' : '');
+              const value = 'DIM(' + dimStr + ') [' + preview + ']';
+              vars.push({
+                name,
+                type: 'string-array',
+                value,
+                length: len,
+                dimensions,
+                elements
+              });
+            } else {
+              vars.push({ name, type: 'string-array', value: 'DIM()', length: len, dimensions: [] });
+            }
+          }
+          p = nextVarAddr;
         } else {
           break;
         }
