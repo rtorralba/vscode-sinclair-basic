@@ -607,6 +607,10 @@ function activate(context) {
       stopOnEntry
     };
 
+    if (retroModeController && retroModeController.beeper && retroModeController.beeper.platform === 'win32' && !retroModeController.beeper.process) {
+      retroModeController.beeper._initProcess();
+    }
+
     if (currentTurbo80Panel) {
       currentTurbo80Panel.reveal(vscode.ViewColumn.Beside, false);
       currentTurbo80Panel.title = `ZX: ${filename}${isDebug ? ' (Debug)' : ''}`;
@@ -639,6 +643,10 @@ function activate(context) {
           handleBasicResumed();
         } else if (message.command === 'debugStopped') {
           handleDebugStopped();
+        } else if (message.command === 'playFallbackAudio') {
+          if (retroModeController && retroModeController.beeper && message.wavBase64) {
+            retroModeController.beeper.playWavBase64(message.wavBase64);
+          }
         }
       });
 

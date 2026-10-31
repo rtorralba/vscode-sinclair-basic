@@ -132,6 +132,7 @@ vscode-sinclair-basic/
    - ROMs for Sinclair 16K/48K/128K and Amstrad +2/+3 are embedded under permissions granted by Amstrad to retrocomputing emulators. Timex ROM changes are in public domain; +D and DISCiPLE under Datel permission; esxDOS under Papaya Dezign permission.
    - Passes the generated `.tap` file directly via memory/base64 without uploading to external servers.
    - Authentic audio, CRT shader effects, 48K/128K machine models, and on-screen keyboard.
+   - Authentic audio (with automatic `AudioContext` / `ensureAudio` initialization on TAP load so `BEEP` and AY sound play immediately without requiring a prior mouse click inside the Webview), CRT shader effects, 48K/128K machine models, and on-screen keyboard.
    - Explicit attribution footer in the Webview: `Emulado con Turbo80 — Emulador de ZX Spectrum por José Enrique García (Incinerator)`.
    - Allows falling back to external desktop emulators (Fuse, etc.) if configured.
 

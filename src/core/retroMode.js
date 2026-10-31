@@ -554,6 +554,27 @@ class SpectrumBeeper {
     } catch {}
   }
 
+  playWavBase64(wavBase64) {
+    if (this.isDisposed || !wavBase64 || typeof wavBase64 !== 'string') return;
+    try {
+      const safeB64 = wavBase64.replace(/[^A-Za-z0-9+/=]/g, '');
+      if (!safeB64) return;
+      if (this.platform === 'win32') {
+        if (!this.process) this._initProcess();
+        this._write(`$ms = New-Object System.IO.MemoryStream(,[Convert]::FromBase64String('${safeB64}')); (New-Object System.Media.SoundPlayer($ms)).Play()\n`);
+      } else {
+        const os = require('os');
+        const tmpFile = path.join(os.tmpdir(), 'zx_emu_fallback.wav');
+        fs.writeFileSync(tmpFile, Buffer.from(safeB64, 'base64'));
+        if (this.platform === 'darwin') {
+          if (spawn) spawn('afplay', [tmpFile], { stdio: 'ignore' });
+        } else {
+          if (spawn) spawn('paplay', [tmpFile], { stdio: 'ignore' });
+        }
+      }
+    } catch {}
+  }
+
   dispose() {
     this.isDisposed = true;
     if (this.process) {

@@ -161,7 +161,136 @@ function getTurbo80Html(webview, extensionUri, vscode) {
       }
     }
 
+    const fallbackAudio = {
+      samples: [],
+      lastLevel: 0,
+      quietFrames: 0,
+      sampleRate: 22050
+    };
+
+    function encodeMonoWavBase64(samples, sampleRate) {
+      const numSamples = samples.length;
+      const dataSize = numSamples * 2;
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
+      const writeStr = (offset, str) => {
+        for (let i = 0; i < str.length; i++) {
+          view.setUint8(offset + i, str.charCodeAt(i));
+        }
+      };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, 'data');
+      view.setUint32(40, dataSize, true);
+      let offset = 44;
+      for (let i = 0; i < numSamples; i++) {
+        let s = samples[i];
+        if (s > 32767) s = 32767;
+        else if (s < -32768) s = -32768;
+        view.setInt16(offset, s, true);
+        offset += 2;
+      }
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+      }
+      return btoa(binary);
+    }
+
+    function flushFallbackAudio() {
+      if (fallbackAudio.samples.length === 0) return;
+      const samples = fallbackAudio.samples;
+      fallbackAudio.samples = [];
+      fallbackAudio.quietFrames = 0;
+      try {
+        const wavBase64 = encodeMonoWavBase64(samples, fallbackAudio.sampleRate);
+        vscode.postMessage({ command: 'playFallbackAudio', wavBase64 });
+      } catch (e) {}
+    }
+
+    function attachAudioFallback() {
+      try {
+        const main = emulator && emulator.main;
+        const beeper = main && main.spectrum && main.spectrum.beeper;
+        if (!beeper || beeper._fallbackHooked) return;
+        beeper._fallbackHooked = true;
+        const origEndFrame = beeper.endFrame;
+        beeper.endFrame = function (events, frameTstates, ayEvents) {
+          try {
+            const ctxRunning = this.audioCtx && this.audioCtx.state === 'running';
+            if (ctxRunning) {
+              if (fallbackAudio.samples.length > 0) {
+                fallbackAudio.samples = [];
+                fallbackAudio.quietFrames = 0;
+              }
+            } else if (this.enabled !== false) {
+              const nEvents = events ? events.length : 0;
+              const isToneFrame = nEvents >= 4;
+              if (isToneFrame || (fallbackAudio.samples.length > 0 && nEvents > 0)) {
+                fallbackAudio.quietFrames = 0;
+                const sr = fallbackAudio.sampleRate;
+                const cpuHz = this.cpuHz || 3500000;
+                const fts = frameTstates || 69888;
+                const nSamples = Math.max(1, Math.round(sr * fts / cpuHz));
+                const sampleStep = fts / nSamples;
+                let evIdx = 0;
+                let level = fallbackAudio.lastLevel;
+                for (let i = 0; i < nSamples; i++) {
+                  const t = i * sampleStep;
+                  const tEnd = (i + 1) * sampleStep;
+                  let acc = 0;
+                  let tCursor = t;
+                  while (evIdx < nEvents && events[evIdx].t < tEnd) {
+                    const te = events[evIdx].t;
+                    if (te > tCursor) {
+                      acc += level * (te - tCursor);
+                      tCursor = te;
+                    }
+                    level = events[evIdx].level;
+                    evIdx++;
+                  }
+                  acc += level * (tEnd - tCursor);
+                  const sampleVal = Math.round(((acc / sampleStep) - 0.5) * 20000);
+                  fallbackAudio.samples.push(sampleVal);
+                }
+                fallbackAudio.lastLevel = nEvents > 0 ? events[nEvents - 1].level : level;
+                if (fallbackAudio.samples.length >= sr * 2) {
+                  flushFallbackAudio();
+                }
+              } else if (fallbackAudio.samples.length > 0) {
+                fallbackAudio.quietFrames++;
+                if (fallbackAudio.quietFrames >= 2) {
+                  flushFallbackAudio();
+                }
+              } else if (nEvents > 0) {
+                fallbackAudio.lastLevel = events[nEvents - 1].level;
+              }
+            }
+          } catch (e) {}
+          return origEndFrame.call(this, events, frameTstates, ayEvents);
+        };
+      } catch (e) {}
+    }
+
+    function ensureEmulatorAudio() {
+      try {
+        attachAudioFallback();
+      } catch (e) {}
+    }
+
     function focusEmulator() {
+      ensureEmulatorAudio();
       try {
         if (emulator && typeof emulator.focus === 'function') {
           emulator.focus();
@@ -678,6 +807,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
 
     function doContinue() {
       if (emulator) {
+        ensureEmulatorAudio();
         basicDebugger.stepMode = null;
         basicDebugger.pauseRequested = false;
         updateFooterStatus('running');
@@ -692,6 +822,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
 
     function doStepLine() {
       if (emulator) {
+        ensureEmulatorAudio();
         basicDebugger.stepMode = 'line';
         basicDebugger.lastLine = basicDebugger.lastPausedLine;
         updateFooterStatus('running');
@@ -702,6 +833,7 @@ function getTurbo80Html(webview, extensionUri, vscode) {
 
     function doStepStmt() {
       if (emulator) {
+        ensureEmulatorAudio();
         basicDebugger.stepMode = 'stmt';
         basicDebugger.lastLine = basicDebugger.lastPausedLine;
         basicDebugger.lastStmt = basicDebugger.lastPausedStmt;
