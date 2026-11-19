@@ -355,6 +355,59 @@ function tokenizeLine(line) {
         while (i < line.length && line[i] === ' ') {
           i++;
         }
+
+        // DEF FN (0xCE): ZX Spectrum ROM requires a 6-byte hidden placeholder
+        // (0x0E, 0x00, 0x00, 0x00, 0x00, 0x00) immediately after each formal
+        // parameter in the parameter list, e.g. DEF FN f(a$,b$)=...
+        // Without these placeholders, calling FN throws "Q Parameter error".
+        if (token === 0xCE) {
+          // 1. Function name: single letter + optional '$'
+          if (i < line.length && /[A-Za-z]/.test(line[i])) {
+            res.push(line.charCodeAt(i));
+            i++;
+            while (i < line.length && line[i] === ' ') i++;
+            if (i < line.length && line[i] === '$') {
+              res.push(0x24);
+              i++;
+              while (i < line.length && line[i] === ' ') i++;
+            }
+          }
+          // 2. Parameter list: '(' [ param [ ',' param ]* ] ')'
+          if (i < line.length && line[i] === '(') {
+            res.push(0x28);
+            i++;
+            while (i < line.length && line[i] === ' ') i++;
+
+            while (i < line.length && line[i] !== ')' && line[i] !== '=' && line[i] !== ':') {
+              if (/[A-Za-z]/.test(line[i])) {
+                res.push(line.charCodeAt(i));
+                i++;
+                while (i < line.length && line[i] === ' ') i++;
+                if (i < line.length && line[i] === '$') {
+                  res.push(0x24);
+                  i++;
+                }
+                // Insert 6-byte hidden parameter slot: 0x0E + 5 zero bytes
+                res.push(0x0E, 0x00, 0x00, 0x00, 0x00, 0x00);
+                while (i < line.length && line[i] === ' ') i++;
+                if (i < line.length && line[i] === ',') {
+                  res.push(0x2C);
+                  i++;
+                  while (i < line.length && line[i] === ' ') i++;
+                }
+              } else {
+                res.push(line.charCodeAt(i));
+                i++;
+              }
+            }
+
+            if (i < line.length && line[i] === ')') {
+              res.push(0x29);
+              i++;
+            }
+          }
+        }
+
         found = true;
         break;
       }

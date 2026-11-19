@@ -85,6 +85,7 @@ function detokenizeLine(lineBytes) {
   let i = 0;
   let inString = false;
   let inRem = false;
+  let inDefFnParams = false;
 
   while (i < len) {
     const b = bytes[i];
@@ -96,18 +97,21 @@ function detokenizeLine(lineBytes) {
 
     // Number marker (0x0E): 5-byte hidden representation follows
     if (b === 0x0E && i + 5 < len) {
-      // Check if ASCII digits were already emitted immediately before 0x0E
-      const hasPrecedingDigits = /(?:\d|\.\d+)$/.test(res);
-      if (!hasPrecedingDigits) {
-        // Protected / hidden number: decode the 5 bytes directly
-        const numVal = decodeSinclairFloat(
-          bytes[i + 1],
-          bytes[i + 2],
-          bytes[i + 3],
-          bytes[i + 4],
-          bytes[i + 5]
-        );
-        res += String(numVal);
+      // Inside DEF FN parameter list, 0x0E + 5 bytes is a parameter value placeholder
+      if (!inDefFnParams) {
+        // Check if ASCII digits were already emitted immediately before 0x0E
+        const hasPrecedingDigits = /(?:\d|\.\d+)$/.test(res);
+        if (!hasPrecedingDigits) {
+          // Protected / hidden number: decode the 5 bytes directly
+          const numVal = decodeSinclairFloat(
+            bytes[i + 1],
+            bytes[i + 2],
+            bytes[i + 3],
+            bytes[i + 4],
+            bytes[i + 5]
+          );
+          res += String(numVal);
+        }
       }
       i += 6;
       continue;
@@ -306,6 +310,7 @@ function detokenizeLine(lineBytes) {
 
     // Colon statement separator (0x3A)
     if (b === 0x3A) {
+      inDefFnParams = false;
       res = res.trimEnd() + ': ';
       i++;
       while (i < len && bytes[i] === 0x20) {
@@ -336,6 +341,7 @@ function detokenizeLine(lineBytes) {
           // No trailing space needed
         } else if (kw === 'DEF FN') {
           res += ' ';
+          inDefFnParams = true;
         } else {
           // Keyword statement or function with argument
           if (nextByte !== 0x0D && nextByte !== 0x3A && nextByte !== 0x20) {
@@ -381,6 +387,9 @@ function detokenizeLine(lineBytes) {
 
     // Regular ASCII printable character (32..126)
     if (b >= 32 && b <= 126) {
+      if (inDefFnParams && (b === 0x29 || b === 0x3D)) {
+        inDefFnParams = false;
+      }
       res += String.fromCharCode(b);
       i++;
       continue;

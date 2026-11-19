@@ -1407,6 +1407,48 @@ var require_tapGenerator = __commonJS({
             while (i < line.length && line[i] === " ") {
               i++;
             }
+            if (token === 206) {
+              if (i < line.length && /[A-Za-z]/.test(line[i])) {
+                res.push(line.charCodeAt(i));
+                i++;
+                while (i < line.length && line[i] === " ") i++;
+                if (i < line.length && line[i] === "$") {
+                  res.push(36);
+                  i++;
+                  while (i < line.length && line[i] === " ") i++;
+                }
+              }
+              if (i < line.length && line[i] === "(") {
+                res.push(40);
+                i++;
+                while (i < line.length && line[i] === " ") i++;
+                while (i < line.length && line[i] !== ")" && line[i] !== "=" && line[i] !== ":") {
+                  if (/[A-Za-z]/.test(line[i])) {
+                    res.push(line.charCodeAt(i));
+                    i++;
+                    while (i < line.length && line[i] === " ") i++;
+                    if (i < line.length && line[i] === "$") {
+                      res.push(36);
+                      i++;
+                    }
+                    res.push(14, 0, 0, 0, 0, 0);
+                    while (i < line.length && line[i] === " ") i++;
+                    if (i < line.length && line[i] === ",") {
+                      res.push(44);
+                      i++;
+                      while (i < line.length && line[i] === " ") i++;
+                    }
+                  } else {
+                    res.push(line.charCodeAt(i));
+                    i++;
+                  }
+                }
+                if (i < line.length && line[i] === ")") {
+                  res.push(41);
+                  i++;
+                }
+              }
+            }
             found = true;
             break;
           }
@@ -4911,22 +4953,25 @@ var require_tapDecoder = __commonJS({
       let i = 0;
       let inString = false;
       let inRem = false;
+      let inDefFnParams = false;
       while (i < len) {
         const b = bytes[i];
         if (b === 13) {
           break;
         }
         if (b === 14 && i + 5 < len) {
-          const hasPrecedingDigits = /(?:\d|\.\d+)$/.test(res);
-          if (!hasPrecedingDigits) {
-            const numVal = decodeSinclairFloat(
-              bytes[i + 1],
-              bytes[i + 2],
-              bytes[i + 3],
-              bytes[i + 4],
-              bytes[i + 5]
-            );
-            res += String(numVal);
+          if (!inDefFnParams) {
+            const hasPrecedingDigits = /(?:\d|\.\d+)$/.test(res);
+            if (!hasPrecedingDigits) {
+              const numVal = decodeSinclairFloat(
+                bytes[i + 1],
+                bytes[i + 2],
+                bytes[i + 3],
+                bytes[i + 4],
+                bytes[i + 5]
+              );
+              res += String(numVal);
+            }
           }
           i += 6;
           continue;
@@ -5093,6 +5138,7 @@ var require_tapDecoder = __commonJS({
           continue;
         }
         if (b === 58) {
+          inDefFnParams = false;
           res = res.trimEnd() + ": ";
           i++;
           while (i < len && bytes[i] === 32) {
@@ -5114,6 +5160,7 @@ var require_tapDecoder = __commonJS({
             } else if (NO_ARG_STATEMENTS.has(kw) || NO_ARG_FUNCTIONS.has(kw)) {
             } else if (kw === "DEF FN") {
               res += " ";
+              inDefFnParams = true;
             } else {
               if (nextByte !== 13 && nextByte !== 58 && nextByte !== 32) {
                 if (nextByte === 40) {
@@ -5147,6 +5194,9 @@ var require_tapDecoder = __commonJS({
           continue;
         }
         if (b >= 32 && b <= 126) {
+          if (inDefFnParams && (b === 41 || b === 61)) {
+            inDefFnParams = false;
+          }
           res += String.fromCharCode(b);
           i++;
           continue;

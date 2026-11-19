@@ -219,3 +219,54 @@ PRINT AT 20, 0; PAPER 2; " "
   assert.ok(foundPaper, 'TAP binary should contain exact folded PAPER control bytes [17, 2, 32]');
 });
 
+test('tokenizeLine inserts 6-byte 0x0E placeholders after DEF FN formal parameters', () => {
+  // String parameters: DEF FN f(a$,b$)=PEEK 23563+256*PEEK 23564
+  const tokens = tokenizeLine('DEF FN f(a$,b$)=PEEK 23563+256*PEEK 23564');
+  const eqIdx = tokens.indexOf(0x3D); // '='
+  assert.ok(eqIdx > 0, 'Should contain "="');
+  const header = tokens.slice(0, eqIdx);
+  assert.deepEqual(header, [
+    0xCE, // DEF FN
+    0x66, // f
+    0x28, // (
+    0x61, 0x24, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, // a$ + 6-byte placeholder
+    0x2C, // ,
+    0x62, 0x24, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, // b$ + 6-byte placeholder
+    0x29  // )
+  ]);
+
+  // String function with numeric and string params + spaces: DEF FN s$(x, y$) = STR$ x + y$
+  const tokens2 = tokenizeLine('DEF FN s$(x, y$) = STR$ x + y$');
+  const eqIdx2 = tokens2.indexOf(0x3D);
+  const header2 = tokens2.slice(0, eqIdx2).filter((b, idx, arr) => !(b === 0x20 && idx === arr.length - 1));
+  assert.deepEqual(header2, [
+    0xCE, // DEF FN
+    0x73, 0x24, // s$
+    0x28, // (
+    0x78, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, // x + 6-byte placeholder
+    0x2C, // ,
+    0x79, 0x24, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, // y$ + 6-byte placeholder
+    0x29  // )
+  ]);
+
+  // Parameterless DEF FN: DEF FN r()=RND (must NOT insert 0x0E)
+  const tokens3 = tokenizeLine('DEF FN r()=RND');
+  assert.deepEqual(tokens3, [
+    0xCE, // DEF FN
+    0x72, // r
+    0x28, // (
+    0x29, // )
+    0x3D, // =
+    0xA5, // RND
+    0x0D  // Enter
+  ]);
+});
+
+test('detokenizeLine round-trips DEF FN parameter placeholders cleanly without emitting zeros', () => {
+  const { detokenizeLine } = require('../src/core/tapDecoder.js');
+  const tokens = tokenizeLine('DEF FN f(a$,b$)=PEEK 23563+256*PEEK 23564');
+  const decoded = detokenizeLine(tokens);
+  assert.equal(decoded, 'DEF FN f(a$,b$)= PEEK 23563+256* PEEK 23564');
+});
+
+
