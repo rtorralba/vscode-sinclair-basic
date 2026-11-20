@@ -2,7 +2,7 @@
   "name": "sinclair-basic",
   "displayName": "Sinclair BASIC",
   "description": "Sinclair BASIC language support for Visual Studio Code. Includes syntax highlighting, renumbering, optional modern syntax (jbas), TAP builder and emulator integration.",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "publisher": "rtorralba",
   "author": "Raül Torralba",
   "license": "AGPL-3.0-only",
@@ -115,6 +115,24 @@
         "language": "jbas"
       }
     ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "sinclairBasicPalette",
+          "title": "ZX Spectrum Colors",
+          "icon": "$(symbol-color)"
+        }
+      ]
+    },
+    "views": {
+      "sinclairBasicPalette": [
+        {
+          "type": "webview",
+          "id": "sinclairBasic.colorBarView",
+          "name": "ZX Color Bar"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "sinclairBasic.compileJBas",
@@ -273,6 +291,24 @@
         "title": "Toggle Retro Mode",
         "category": "Sinclair BASIC",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "sinclairBasic.toggleColorPreview",
+        "title": "Toggle Visual Color Overlay (PAPER/INK)",
+        "category": "Sinclair BASIC",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "sinclairBasic.openColorBar",
+        "title": "Open ZX Spectrum Color Bar",
+        "category": "Sinclair BASIC",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "sinclairBasic.applySpectrumColor",
+        "title": "Apply ZX Color / Attribute to Selection...",
+        "category": "Sinclair BASIC",
+        "icon": "$(symbol-color)"
       }
     ],
     "menus": {
@@ -306,6 +342,11 @@
           "command": "sinclairBasic.debugTurbo80",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "navigation@4"
+        },
+        {
+          "command": "sinclairBasic.openColorBar",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "navigation@4.5"
         },
         {
           "command": "sinclairBasic.shareTurbo80",
@@ -363,6 +404,11 @@
           "command": "sinclairBasic.shareTurbo80",
           "when": "editorLangId == sinclair-basic || editorLangId == jbas",
           "group": "2_build@3"
+        },
+        {
+          "command": "sinclairBasic.applySpectrumColor",
+          "when": "editorLangId == sinclair-basic || editorLangId == jbas",
+          "group": "1_modification@1"
         }
       ],
       "explorer/context": [
@@ -420,6 +466,37 @@
         "mac": "shift+alt+f",
         "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
       },
+      {
+        "command": "sinclairBasic.applySpectrumColor",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c",
+        "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
+      },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 0 }, "key": "alt+p 0", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 1 }, "key": "alt+p 1", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 2 }, "key": "alt+p 2", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 3 }, "key": "alt+p 3", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 4 }, "key": "alt+p 4", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 5 }, "key": "alt+p 5", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 6 }, "key": "alt+p 6", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 7 }, "key": "alt+p 7", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "PAPER", "value": 8 }, "key": "alt+p 8", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 0 }, "key": "alt+i 0", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 1 }, "key": "alt+i 1", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 2 }, "key": "alt+i 2", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 3 }, "key": "alt+i 3", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 4 }, "key": "alt+i 4", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 5 }, "key": "alt+i 5", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 6 }, "key": "alt+i 6", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 7 }, "key": "alt+i 7", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 8 }, "key": "alt+i 8", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INK", "value": 9 }, "key": "alt+i 9", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "BRIGHT", "value": 1 }, "key": "alt+b 1", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "BRIGHT", "value": 0 }, "key": "alt+b 0", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "FLASH", "value": 1 }, "key": "alt+f 1", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "FLASH", "value": 0 }, "key": "alt+f 0", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INVERSE", "value": 1 }, "key": "alt+v 1", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
+      { "command": "sinclairBasic.applySpectrumAttribute", "args": { "attr": "INVERSE", "value": 0 }, "key": "alt+v 0", "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)" },
       {
         "command": "sinclairBasic.transpileJBas",
         "key": "ctrl+shift+t",
@@ -630,6 +707,12 @@
           "default": false,
           "description": "Always replace existing line numbers in Sinclair BASIC files on Enter, even when Retro Mode is disabled.",
           "order": 19
+        },
+        "sinclairBasic.colorPreview.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Display visual ZX Spectrum PAPER, INK, BRIGHT, FLASH, and INVERSE color overlays applied to characters inside string literals.",
+          "order": 20
         }
       }
     }

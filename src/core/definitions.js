@@ -159,8 +159,187 @@ function getBasDefinition(documentTextOrLines, lineIndex, charIndex) {
   };
 }
 
+/**
+ * Masks string literals with spaces and truncates single-quote (') and REM comments
+ * outside strings for a .jbas line.
+ * @param {string} lineText
+ * @returns {string}
+ */
+function maskJBasStringsAndComments(lineText) {
+  let out = '';
+  let inString = false;
+  let i = 0;
+  const n = lineText.length;
+
+  while (i < n) {
+    const c = lineText[i];
+
+    if (c === '"') {
+      inString = !inString;
+      out += ' ';
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      out += ' ';
+      i++;
+      continue;
+    }
+
+    if (c === "'") {
+      break;
+    }
+
+    if (
+      (c === 'R' || c === 'r') &&
+      i + 3 <= n &&
+      lineText.slice(i, i + 3).toUpperCase() === 'REM'
+    ) {
+      const prev = i > 0 ? lineText[i - 1] : ' ';
+      const next = i + 3 < n ? lineText[i + 3] : ' ';
+      if (!/[a-zA-Z0-9_]/.test(prev) && !/[a-zA-Z0-9_]/.test(next)) {
+        break;
+      }
+    }
+
+    out += c;
+    i++;
+  }
+
+  return out;
+}
+
+/**
+ * Finds a @label reference at the specified character column on a .jbas line
+ * (ignoring strings and comments).
+ * @param {string} lineText
+ * @param {number} charIndex
+ * @returns {{ labelName: string, startCol: number, endCol: number } | null}
+ */
+function findJBasLabelAtPosition(lineText, charIndex) {
+  if (typeof lineText !== 'string' || charIndex < 0 || charIndex > lineText.length) {
+    return null;
+  }
+
+  const masked = maskJBasStringsAndComments(lineText);
+  if (charIndex > masked.length) {
+    return null;
+  }
+
+  const labelRegex = /@([a-zA-Z0-9_]+)/g;
+  let match;
+  while ((match = labelRegex.exec(masked)) !== null) {
+    const startCol = match.index;
+    const endCol = startCol + match[0].length;
+    if (charIndex >= startCol && charIndex <= endCol) {
+      return {
+        labelName: match[1],
+        startCol,
+        endCol
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Finds the definition of `@labelName:` in a .jbas document.
+ * Supports leading and chained labels (e.g. `@a: @b: PRINT "HI"`), case-insensitively.
+ * @param {string|string[]|{ lineCount: number, lineAt: (i: number) => { text: string } }} documentTextOrLines
+ * @param {string} labelName
+ * @returns {{ lineIndex: number, startCol: number, endCol: number, labelName: string, text: string } | null}
+ */
+function findJBasLabelDefinition(documentTextOrLines, labelName) {
+  if (!labelName || typeof labelName !== 'string') return null;
+  const cleanName = labelName.startsWith('@') ? labelName.slice(1) : labelName;
+  if (!cleanName) return null;
+  const targetLower = cleanName.toLowerCase();
+
+  const isTextDoc = documentTextOrLines &&
+    typeof documentTextOrLines.lineCount === 'number' &&
+    typeof documentTextOrLines.lineAt === 'function';
+
+  const lines = isTextDoc
+    ? null
+    : (Array.isArray(documentTextOrLines)
+      ? documentTextOrLines
+      : (typeof documentTextOrLines === 'string' ? documentTextOrLines.split(/\r?\n/) : []));
+
+  const count = isTextDoc ? documentTextOrLines.lineCount : lines.length;
+
+  for (let i = 0; i < count; i++) {
+    const line = isTextDoc ? documentTextOrLines.lineAt(i).text : lines[i];
+    const masked = maskJBasStringsAndComments(line);
+    let pos = 0;
+
+    // Scan one or more chained leading label definitions: @label1: @label2: ...
+    while (pos < masked.length) {
+      while (pos < masked.length && /\s/.test(masked[pos])) {
+        pos++;
+      }
+      const rest = masked.slice(pos);
+      const match = rest.match(/^@([a-zA-Z0-9_]+)\s*:/);
+      if (!match) {
+        break;
+      }
+      const foundName = match[1];
+      const startCol = pos;
+      const endCol = pos + 1 + foundName.length;
+      if (foundName.toLowerCase() === targetLower) {
+        return {
+          lineIndex: i,
+          startCol,
+          endCol,
+          labelName: foundName,
+          text: line
+        };
+      }
+      pos += match[0].length;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * High-level helper: returns definition location for a position in a .jbas file.
+ * @param {string|string[]} documentTextOrLines
+ * @param {number} lineIndex
+ * @param {number} charIndex
+ * @returns {{ labelName: string, origin: { startCol: number, endCol: number }, target: { lineIndex: number, startCol: number, endCol: number, labelName: string, text: string } } | null}
+ */
+function getJBasDefinition(documentTextOrLines, lineIndex, charIndex) {
+  const lines = Array.isArray(documentTextOrLines)
+    ? documentTextOrLines
+    : documentTextOrLines.split(/\r?\n/);
+
+  if (lineIndex < 0 || lineIndex >= lines.length) return null;
+
+  const lineText = lines[lineIndex];
+  const labelRef = findJBasLabelAtPosition(lineText, charIndex);
+  if (!labelRef) return null;
+
+  const targetLocation = findJBasLabelDefinition(lines, labelRef.labelName);
+  if (!targetLocation) return null;
+
+  return {
+    labelName: labelRef.labelName,
+    origin: {
+      startCol: labelRef.startCol,
+      endCol: labelRef.endCol
+    },
+    target: targetLocation
+  };
+}
+
 module.exports = {
   findBasJumpTargetAtPosition,
   findBasLineIndex,
-  getBasDefinition
+  getBasDefinition,
+  maskJBasStringsAndComments,
+  findJBasLabelAtPosition,
+  findJBasLabelDefinition,
+  getJBasDefinition
 };

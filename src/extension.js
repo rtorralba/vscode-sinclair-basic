@@ -14,7 +14,12 @@ const { formatKeywordsToUpper } = require('./core/formatter');
 const { createSinclairCompletionProvider } = require('./core/completions');
 const { translateWildcardsToChr } = require('./core/wildcards');
 const { getBasFoldingRanges } = require('./core/folding');
-const { findBasJumpTargetAtPosition, findBasLineIndex } = require('./core/definitions');
+const {
+  findBasJumpTargetAtPosition,
+  findBasLineIndex,
+  findJBasLabelAtPosition,
+  findJBasLabelDefinition
+} = require('./core/definitions');
 const { uploadTapToHost, buildTurbo80ShareUrl } = require('./core/share');
 const {
   ROM48_STMT_ADDR,
@@ -32,8 +37,10 @@ const { getTurbo80Html } = require('./core/turbo80Html');
 const { extractProgramsFromTap, tapToBas, tapToJBas } = require('./core/tapDecoder');
 const { basToJBas } = require('./core/bas2jbas');
 const { RetroModeController } = require('./core/retroMode');
+const { ColorPreviewController } = require('./core/colorPreview');
 
 let retroModeController = null;
+let colorPreviewController = null;
 
 /**
  * Resolves the target document from an optional command URI parameter or active text editor.
@@ -61,7 +68,7 @@ async function getTargetDocument(uri) {
  * @param {string} distDir Output directory for .tap file
  * @returns {Promise<{ tapPath: string, autoStartLine: number }>}
  */
-async function buildTapFromBas(basPath, distDir) {
+async function buildTapFromBas(basPath, distDir, overrideBasicCode) {
   const config = vscode.workspace.getConfiguration('sinclairBasic');
   const configuredAutoStart = config.get('autoStartLine', 0);
   const useExternalBas2Tap = config.get('useExternalBas2Tap', false);
@@ -73,42 +80,56 @@ async function buildTapFromBas(basPath, distDir) {
   }
   const tapPath = path.join(outputDir, `${baseName}.tap`);
 
+  const sourceBasicCode = typeof overrideBasicCode === 'string'
+    ? overrideBasicCode
+    : fs.readFileSync(basPath, 'utf-8');
+
   // Always generate <baseName>.sinclair.bas translating bas2tap wildcards to standard Sinclair BASIC CHR$
   if (!baseName.endsWith('.sinclair')) {
-    const basicContent = fs.readFileSync(basPath, 'utf-8');
-    const sinclairContent = translateWildcardsToChr(basicContent);
+    const sinclairContent = translateWildcardsToChr(sourceBasicCode);
     const sinclairPath = path.join(outputDir, `${baseName}.sinclair.bas`);
     fs.writeFileSync(sinclairPath, sinclairContent, 'utf-8');
   }
 
   let autoStartLine = configuredAutoStart;
   if (autoStartLine <= 0) {
-    const basContent = fs.readFileSync(basPath, 'utf-8');
-    const match = basContent.match(/^\s*(\d+)/m);
+    const match = sourceBasicCode.match(/^\s*(\d+)/m);
     autoStartLine = match ? parseInt(match[1], 10) : 10;
   }
 
   // If user explicitly configured external bas2tap executable
   if (useExternalBas2Tap) {
     const bas2tapPath = config.get('bas2tapPath', 'bas2tap');
-    const args = [`-a${autoStartLine}`, basPath, tapPath];
+    let inputPathForExternal = basPath;
+    let tempBasPath = null;
+    if (typeof overrideBasicCode === 'string') {
+      tempBasPath = path.join(outputDir, `${baseName}.__zxcolored__.bas`);
+      fs.writeFileSync(tempBasPath, sourceBasicCode, 'utf-8');
+      inputPathForExternal = tempBasPath;
+    }
+    const args = [`-a${autoStartLine}`, inputPathForExternal, tapPath];
 
-    await new Promise((resolve, reject) => {
-      execFile(bas2tapPath, args, (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(stderr || stdout || error.message));
-        } else {
-          resolve(stdout);
-        }
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(bas2tapPath, args, (error, stdout, stderr) => {
+          if (error) {
+            reject(new Error(stderr || stdout || error.message));
+          } else {
+            resolve(stdout);
+          }
+        });
       });
-    });
+    } finally {
+      if (tempBasPath && fs.existsSync(tempBasPath)) {
+        try { fs.unlinkSync(tempBasPath); } catch { /* ignore */ }
+      }
+    }
 
     return { tapPath, autoStartLine };
   }
 
   // Native Pure JavaScript TAP generator (zero external dependencies!)
-  const basicCode = fs.readFileSync(basPath, 'utf-8');
-  const result = generateTapFile(basicCode, tapPath, {
+  const result = generateTapFile(sourceBasicCode, tapPath, {
     filename: baseName,
     autostart: autoStartLine
   });
@@ -195,7 +216,9 @@ function activate(context) {
     const outDirName = config.get('outputDirectory', 'dist');
     const optimizePrintAttributes = config.get('optimizePrintAttributes', true);
 
-    const sourceText = doc.getText();
+    const sourceText = colorPreviewController
+      ? colorPreviewController.resolveSourceWithColors(doc)
+      : doc.getText();
     const all = transpileJBasAllVersions(sourceText, { optimizePrintAttributes });
 
     if (!all.success) {
@@ -250,7 +273,9 @@ function activate(context) {
     const outDirName = config.get('outputDirectory', 'dist');
     const optimizePrintAttributes = config.get('optimizePrintAttributes', true);
 
-    const sourceText = doc.getText();
+    const sourceText = colorPreviewController
+      ? colorPreviewController.resolveSourceWithColors(doc)
+      : doc.getText();
     const all = transpileJBasAllVersions(sourceText, { optimizePrintAttributes });
     activeDebugSourceMap = all.compact;
 
@@ -323,7 +348,14 @@ function activate(context) {
       const rootDir = workspaceFolder ? workspaceFolder.uri.fsPath : path.dirname(filePath);
       const distDir = path.isAbsolute(outDirName) ? outDirName : path.join(rootDir, outDirName);
 
-      const { tapPath, autoStartLine } = await buildTapFromBas(filePath, distDir);
+      const resolvedBasicCode = colorPreviewController
+        ? colorPreviewController.resolveSourceWithColors(doc)
+        : undefined;
+      const overrideCode = resolvedBasicCode !== undefined && resolvedBasicCode !== doc.getText()
+        ? resolvedBasicCode
+        : undefined;
+
+      const { tapPath, autoStartLine } = await buildTapFromBas(filePath, distDir, overrideCode);
 
       vscode.window.showInformationMessage(`Successfully built TAP: ${path.basename(tapPath)} (Autostart line ${autoStartLine})`);
       return tapPath;
@@ -1062,31 +1094,41 @@ function activate(context) {
   }
 
   // Definition Provider: Ctrl+Click on @label navigates to @label:
-  const definitionProvider = vscode.languages.registerDefinitionProvider('jbas', {
-    provideDefinition(document, position) {
-      const range = document.getWordRangeAtPosition(position, /@[a-zA-Z0-9_]+/);
-      if (!range) return null;
+  const definitionProvider = vscode.languages.registerDefinitionProvider(
+    [{ language: 'jbas' }, { pattern: '**/*.jbas' }],
+    {
+      provideDefinition(document, position) {
+        const lineText = document.lineAt(position.line).text;
+        const labelRef = findJBasLabelAtPosition(lineText, position.character);
+        if (!labelRef) return null;
 
-      const rawWord = document.getText(range);
-      const labelName = rawWord.startsWith('@') ? rawWord.slice(1) : rawWord;
-      if (!labelName) return null;
+        const targetLoc = findJBasLabelDefinition(document, labelRef.labelName);
+        if (!targetLoc) return null;
 
-      const defRegex = new RegExp(`^\\s*@${labelName}\\s*:`, 'i');
-      const lineCount = document.lineCount;
+        const originRange = new vscode.Range(
+          position.line,
+          labelRef.startCol,
+          position.line,
+          labelRef.endCol
+        );
+        const targetRange = new vscode.Range(
+          targetLoc.lineIndex,
+          targetLoc.startCol,
+          targetLoc.lineIndex,
+          targetLoc.endCol
+        );
 
-      for (let i = 0; i < lineCount; i++) {
-        const line = document.lineAt(i);
-        const match = line.text.match(defRegex);
-        if (match) {
-          const col = line.text.indexOf('@' + labelName);
-          const targetPos = new vscode.Position(i, col >= 0 ? col : 0);
-          return new vscode.Location(document.uri, targetPos);
-        }
+        return [
+          {
+            originSelectionRange: originRange,
+            targetUri: document.uri,
+            targetRange: targetRange,
+            targetSelectionRange: targetRange
+          }
+        ];
       }
-
-      return null;
     }
-  });
+  );
 
   // Definition Provider for Sinclair BASIC (.bas): Ctrl+Click on jump line number (e.g. GO SUB 500, GO TO 100)
   const basDefinitionProvider = vscode.languages.registerDefinitionProvider('sinclair-basic', {
@@ -1174,8 +1216,9 @@ function activate(context) {
     }
   });
 
-  // Language configuration for jbas: auto-indent after typing a label and pressing Enter
+  // Language configuration for jbas: wordPattern for @labels & auto-indent after typing a label and pressing Enter
   const jbasLanguageConfig = vscode.languages.setLanguageConfiguration('jbas', {
+    wordPattern: /(-?\d*\.\d\w*)|(@[a-zA-Z0-9_]+)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/,
     indentationRules: {
       increaseIndentPattern: /^\s*@[a-zA-Z0-9_]+\s*:.*$/,
       decreaseIndentPattern: /^\b$/
@@ -1544,11 +1587,20 @@ function activate(context) {
   retroModeController.init();
   context.subscriptions.push(retroModeController);
 
+  // Initialize Live ZX Spectrum Color Preview & Control Tag Conceal
+  colorPreviewController = new ColorPreviewController(vscode, context);
+  colorPreviewController.init();
+  context.subscriptions.push(colorPreviewController);
+
   // Validate any currently open .jbas documents
   vscode.workspace.textDocuments.forEach(validateJBasDocument);
 }
 
 function deactivate() {
+  if (colorPreviewController) {
+    colorPreviewController.dispose();
+    colorPreviewController = null;
+  }
   if (retroModeController) {
     retroModeController.dispose();
     retroModeController = null;

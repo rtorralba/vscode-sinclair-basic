@@ -93,7 +93,22 @@ function translateStringLiteralToChr(strContent) {
       }
     }
 
-    // 2. Check for backslash escapes (\A..\U, \xHH)
+    // 2. Check for single-character Unicode UDG symbols (α..φ or Ⓐ..Ⓤ)
+    const greekUdgIdx = 'αβγδεζηθικλμνξοπρστυφ'.indexOf(strContent[i]);
+    const cp = strContent.charCodeAt(i);
+    if (greekUdgIdx !== -1 || (cp >= 0x24B6 && cp <= 0x24CA)) {
+      const udgOffset = greekUdgIdx !== -1 ? greekUdgIdx : (cp - 0x24B6);
+      hasWildcards = true;
+      if (currentText.length > 0) {
+        parts.push({ type: 'text', value: currentText });
+        currentText = '';
+      }
+      parts.push({ type: 'chr', values: [144 + udgOffset] });
+      i++;
+      continue;
+    }
+
+    // 3. Check for backslash escapes (\A..\U, \xHH)
     if (strContent[i] === '\\' && i + 1 < n) {
       const nextChar = strContent[i + 1].toUpperCase();
       if (nextChar >= 'A' && nextChar <= 'U') {

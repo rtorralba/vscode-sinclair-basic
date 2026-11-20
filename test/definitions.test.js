@@ -3,7 +3,10 @@ const assert = require('node:assert');
 const {
   findBasJumpTargetAtPosition,
   findBasLineIndex,
-  getBasDefinition
+  getBasDefinition,
+  findJBasLabelAtPosition,
+  findJBasLabelDefinition,
+  getJBasDefinition
 } = require('../src/core/definitions');
 
 test('findBasJumpTargetAtPosition detects GO SUB and GOSUB target lines', () => {
@@ -136,4 +139,75 @@ test('getBasDefinition returns full navigation info for Ctrl+Click', () => {
   ];
   const defMissing = getBasDefinition(docWithMissing, 0, 10);
   assert.strictEqual(defMissing, null);
+});
+
+test('findJBasLabelAtPosition detects @label at any character including @ and protects strings/comments', () => {
+  const line = '  IF a=1 THEN GO SUB @draw_player \' @ignored';
+  // '@draw_player' starts at index 21, ends at 33
+  const atSign = findJBasLabelAtPosition(line, 21);
+  assert.ok(atSign);
+  assert.strictEqual(atSign.labelName, 'draw_player');
+  assert.strictEqual(atSign.startCol, 21);
+  assert.strictEqual(atSign.endCol, 33);
+
+  const mid = findJBasLabelAtPosition(line, 26);
+  assert.ok(mid);
+  assert.strictEqual(mid.labelName, 'draw_player');
+
+  // Inside single-quote comment -> null
+  assert.strictEqual(findJBasLabelAtPosition(line, 37), null);
+
+  // Inside string literal -> null
+  const strLine = 'PRINT "EMAIL: a@b_c"';
+  assert.strictEqual(findJBasLabelAtPosition(strLine, 16), null);
+
+  // Inside REM comment -> null
+  const remLine = 'REM jump to @draw_player';
+  assert.strictEqual(findJBasLabelAtPosition(remLine, 14), null);
+});
+
+test('findJBasLabelDefinition finds leading, indented, chained, and case-insensitive @label definitions', () => {
+  const doc = [
+    'GO SUB @init',
+    'GO TO @SecondLabel',
+    '@init:',
+    '  PRINT "OK"',
+    '  @first: @secondlabel: PRINT "CHAINED"',
+    '\' @fake_label:'
+  ];
+
+  const initDef = findJBasLabelDefinition(doc, 'init');
+  assert.ok(initDef);
+  assert.strictEqual(initDef.lineIndex, 2);
+  assert.strictEqual(initDef.startCol, 0);
+  assert.strictEqual(initDef.endCol, 5);
+
+  const chainedDef = findJBasLabelDefinition(doc, 'SecondLabel');
+  assert.ok(chainedDef);
+  assert.strictEqual(chainedDef.lineIndex, 4);
+  assert.strictEqual(chainedDef.startCol, 10);
+  assert.strictEqual(chainedDef.endCol, 22);
+
+  // Commented label must not match
+  assert.strictEqual(findJBasLabelDefinition(doc, 'fake_label'), null);
+});
+
+test('getJBasDefinition returns full navigation info for Ctrl+Click in .jbas', () => {
+  const doc = [
+    'GO SUB @game_over',
+    'STOP',
+    '@game_over:',
+    '  PRINT "GAME OVER"',
+    '  RETURN'
+  ];
+
+  // Cursor on '@game_over' (col 7..17)
+  const def = getJBasDefinition(doc, 0, 10);
+  assert.ok(def);
+  assert.strictEqual(def.labelName, 'game_over');
+  assert.strictEqual(def.origin.startCol, 7);
+  assert.strictEqual(def.origin.endCol, 17);
+  assert.strictEqual(def.target.lineIndex, 2);
+  assert.strictEqual(def.target.startCol, 0);
+  assert.strictEqual(def.target.endCol, 10);
 });

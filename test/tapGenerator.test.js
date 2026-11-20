@@ -269,4 +269,16 @@ test('detokenizeLine round-trips DEF FN parameter placeholders cleanly without e
   assert.equal(decoded, 'DEF FN f(a$,b$)= PEEK 23563+256* PEEK 23564');
 });
 
+test('tokenizeLine compiles single-char Unicode UDG symbols (α..φ and Ⓐ..Ⓤ) inside strings to bytes 144..164', () => {
+  const tokens = tokenizeLine('PRINT "αβζφ"');
+  const q1 = tokens.indexOf(0x22);
+  const q2 = tokens.indexOf(0x22, q1 + 1);
+  assert.deepEqual(Array.from(tokens.slice(q1 + 1, q2)), [144, 145, 149, 164]);
+
+  const tokens2 = tokenizeLine('PRINT "ⒶⒷⒻⓊ"');
+  const q3 = tokens2.indexOf(0x22);
+  const q4 = tokens2.indexOf(0x22, q3 + 1);
+  assert.deepEqual(Array.from(tokens2.slice(q3 + 1, q4)), [144, 145, 149, 164]);
+});
+
 

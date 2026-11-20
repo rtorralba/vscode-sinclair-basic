@@ -230,7 +230,22 @@ function tokenizeLine(line) {
             continue;
           }
         }
-        res.push(line.charCodeAt(i));
+        // Single-character Unicode UDG symbols:
+        // - Greek lowercase α..φ (exact 1.0x monospace width in Consolas/DejaVu/Cascadia/etc.)
+        // - Circled Latin Ⓐ..Ⓤ (U+24B6..U+24CA)
+        const cp = line.charCodeAt(i);
+        const greekUdgIdx = 'αβγδεζηθικλμνξοπρστυφ'.indexOf(line[i]);
+        if (greekUdgIdx !== -1) {
+          res.push(144 + greekUdgIdx);
+          i++;
+          continue;
+        }
+        if (cp >= 0x24B6 && cp <= 0x24CA) {
+          res.push(144 + (cp - 0x24B6));
+          i++;
+          continue;
+        }
+        res.push(cp);
         i++;
       }
       if (i < line.length) {

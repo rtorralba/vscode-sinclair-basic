@@ -11,7 +11,12 @@ const { formatKeywordsToUpper } = require('./core/formatter');
 const { createSinclairCompletionProvider } = require('./core/completions');
 const { translateWildcardsToChr } = require('./core/wildcards');
 const { getBasFoldingRanges } = require('./core/folding');
-const { findBasJumpTargetAtPosition, findBasLineIndex } = require('./core/definitions');
+const {
+  findBasJumpTargetAtPosition,
+  findBasLineIndex,
+  findJBasLabelAtPosition,
+  findJBasLabelDefinition
+} = require('./core/definitions');
 const { uploadTapToHost, buildTurbo80ShareUrl } = require('./core/share');
 const {
   findDocumentLine,
@@ -26,8 +31,10 @@ const { getTurbo80Html } = require('./core/turbo80Html');
 const { extractProgramsFromTap, tapToBas, tapToJBas } = require('./core/tapDecoder');
 const { basToJBas } = require('./core/bas2jbas');
 const { RetroModeController } = require('./core/retroMode');
+const { ColorPreviewController } = require('./core/colorPreview');
 
 let retroModeController = null;
+let colorPreviewController = null;
 
 /**
  * Returns the basename of a Uri, optionally stripping an extension.
@@ -102,7 +109,9 @@ async function buildTapFromDocument(doc) {
 
   await vscode.workspace.fs.createDirectory(distUri);
 
-  let basicCode = doc.getText();
+  let basicCode = colorPreviewController
+    ? colorPreviewController.resolveSourceWithColors(doc)
+    : doc.getText();
   let baseName = '';
   let sourceMap = null;
 
@@ -679,7 +688,10 @@ function activate(context) {
     const config = vscode.workspace.getConfiguration('sinclairBasic');
     const outDirName = config.get('outputDirectory', 'dist');
 
-    const all = transpileJBasAllVersions(doc.getText());
+    const sourceText = colorPreviewController
+      ? colorPreviewController.resolveSourceWithColors(doc)
+      : doc.getText();
+    const all = transpileJBasAllVersions(sourceText);
     if (!all.success) {
       vscode.window.showErrorMessage(`Compilation failed:\n${all.errors.join('\n')}`);
       return;
@@ -923,8 +935,9 @@ function activate(context) {
     }
   }
 
-  // Language configuration (auto-indent)
+  // Language configuration (wordPattern for @labels & auto-indent)
   const jbasLanguageConfig = vscode.languages.setLanguageConfiguration('jbas', {
+    wordPattern: /(-?\d*\.\d\w*)|(@[a-zA-Z0-9_]+)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/,
     onEnterRules: [
       {
         beforeText: /^\s*@[a-zA-Z0-9_]+:\s*$/,
@@ -986,24 +999,41 @@ function activate(context) {
   }
 
   // Language providers for .jbas (Ctrl+Click, Outline, References, Rename)
-  const definitionProvider = vscode.languages.registerDefinitionProvider('jbas', {
-    provideDefinition(document, position) {
-      const range = document.getWordRangeAtPosition(position, /@[a-zA-Z0-9_]+/);
-      if (!range) return null;
-      const word = document.getText(range);
-      const labelName = word.startsWith('@') ? word.slice(1) : word;
-      const targetRegex = new RegExp(`^\\s*@${labelName}:`);
+  const definitionProvider = vscode.languages.registerDefinitionProvider(
+    [{ language: 'jbas' }, { pattern: '**/*.jbas' }],
+    {
+      provideDefinition(document, position) {
+        const lineText = document.lineAt(position.line).text;
+        const labelRef = findJBasLabelAtPosition(lineText, position.character);
+        if (!labelRef) return null;
 
-      for (let i = 0; i < document.lineCount; i++) {
-        const line = document.lineAt(i);
-        if (targetRegex.test(line.text)) {
-          const col = line.text.indexOf(`@${labelName}:`);
-          return new vscode.Location(document.uri, new vscode.Position(i, col));
-        }
+        const targetLoc = findJBasLabelDefinition(document, labelRef.labelName);
+        if (!targetLoc) return null;
+
+        const originRange = new vscode.Range(
+          position.line,
+          labelRef.startCol,
+          position.line,
+          labelRef.endCol
+        );
+        const targetRange = new vscode.Range(
+          targetLoc.lineIndex,
+          targetLoc.startCol,
+          targetLoc.lineIndex,
+          targetLoc.endCol
+        );
+
+        return [
+          {
+            originSelectionRange: originRange,
+            targetUri: document.uri,
+            targetRange: targetRange,
+            targetSelectionRange: targetRange
+          }
+        ];
       }
-      return null;
     }
-  });
+  );
 
   // Definition Provider for Sinclair BASIC (.bas): Ctrl+Click on jump line number (e.g. GO SUB 500, GO TO 100)
   const basDefinitionProvider = vscode.languages.registerDefinitionProvider('sinclair-basic', {
@@ -1377,10 +1407,19 @@ function activate(context) {
   retroModeController.init();
   context.subscriptions.push(retroModeController);
 
+  // Initialize Live ZX Spectrum Color Preview & Control Tag Conceal
+  colorPreviewController = new ColorPreviewController(vscode, context);
+  colorPreviewController.init();
+  context.subscriptions.push(colorPreviewController);
+
   vscode.workspace.textDocuments.forEach(validateJBasDocument);
 }
 
 function deactivate() {
+  if (colorPreviewController) {
+    colorPreviewController.dispose();
+    colorPreviewController = null;
+  }
   if (retroModeController) {
     retroModeController.dispose();
     retroModeController = null;
