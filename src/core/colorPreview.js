@@ -371,6 +371,93 @@ function shiftColorMapForChange(linesMap, startLine, startCol, endLine, endCol, 
 }
 
 /**
+ * Extracts a relative slice of color/UDG runs for a copied text range [startLine:startCol .. endLine:endCol].
+ * Line 0 columns are relative to `startCol`; subsequent lines keep 0-based column offsets.
+ *
+ * @param {Record<string, Array<Object>>} linesMap
+ * @param {number} startLine
+ * @param {number} startCol
+ * @param {number} endLine
+ * @param {number} endCol
+ * @returns {Array<Array<Object>>}
+ */
+function extractColorSlice(linesMap, startLine, startCol, endLine, endCol) {
+  const result = [];
+  if (!linesMap) return result;
+
+  for (let lineIdx = startLine; lineIdx <= endLine; lineIdx++) {
+    const runs = linesMap[String(lineIdx)] || [];
+    const lineStart = lineIdx === startLine ? startCol : 0;
+    const lineEnd = lineIdx === endLine ? endCol : Infinity;
+    const colShift = lineIdx === startLine ? startCol : 0;
+
+    const sliced = [];
+    for (const r of runs) {
+      const s = Math.max(r.start, lineStart);
+      const e = Math.min(r.end, lineEnd);
+      if (e > s) {
+        sliced.push({
+          start: s - colShift,
+          end: e - colShift,
+          ...cleanAttrs(r)
+        });
+      }
+    }
+    result.push(sliced);
+  }
+
+  return result;
+}
+
+/**
+ * Applies a previously extracted relative color/UDG slice into `linesMap` at (pasteStartLine, pasteStartCol).
+ *
+ * @param {Record<string, Array<Object>>} linesMap
+ * @param {number} pasteStartLine
+ * @param {number} pasteStartCol
+ * @param {Array<Array<Object>>} sliceLineRuns
+ * @returns {Record<string, Array<Object>>}
+ */
+function applyColorSlice(linesMap, pasteStartLine, pasteStartCol, sliceLineRuns) {
+  if (!Array.isArray(sliceLineRuns) || sliceLineRuns.length === 0) {
+    return linesMap || {};
+  }
+
+  const nextMap = { ...(linesMap || {}) };
+
+  for (let i = 0; i < sliceLineRuns.length; i++) {
+    const runsToAdd = sliceLineRuns[i];
+    if (!runsToAdd || runsToAdd.length === 0) continue;
+
+    const targetLine = pasteStartLine + i;
+    const colOffset = i === 0 ? pasteStartCol : 0;
+    const key = String(targetLine);
+    const existing = nextMap[key] || [];
+
+    const cellMap = new Map();
+    for (const r of existing) {
+      const base = cleanAttrs(r);
+      for (let c = r.start; c < r.end; c++) {
+        cellMap.set(c, { ...base });
+      }
+    }
+    for (const r of runsToAdd) {
+      const base = cleanAttrs(r);
+      for (let c = r.start + colOffset; c < r.end + colOffset; c++) {
+        if (c >= 0) cellMap.set(c, { ...base });
+      }
+    }
+
+    const merged = cellMapToRuns(cellMap);
+    if (merged.length > 0) {
+      nextMap[key] = merged;
+    }
+  }
+
+  return nextMap;
+}
+
+/**
  * Injects {PAPER n}{INK n}{BRIGHT n}{FLASH n}{INVERSE n} bas2tap control codes into
  * the source text for all visually colored character runs, leaving any manual bas2tap
  * codes and uncolored lines 100% untouched.
@@ -593,6 +680,96 @@ function generateUdgBasicCode(udgMap) {
   }
 
   return [...loaderLines, '', ...dataLines].join('\n');
+}
+
+/**
+ * Formats 8 UDG bytes as 8 sjasmplus-style `DG ........` lines (with `#` for 1 and `.` for 0).
+ * @param {number[]} bytes
+ * @param {string} [indent='']
+ * @returns {string[]}
+ */
+function formatUdgDgLines(bytes, indent = '') {
+  const lines = [];
+  for (let r = 0; r < 8; r++) {
+    const val = (bytes && Number.isFinite(Number(bytes[r]))) ? (Number(bytes[r]) & 0xFF) : 0;
+    let pattern = '';
+    for (let b = 7; b >= 0; b--) {
+      pattern += (val & (1 << b)) ? '#' : '.';
+    }
+    lines.push(`${indent}DG ${pattern}`);
+  }
+  return lines;
+}
+
+/**
+ * Generates compact ZX Spectrum BASIC loader FOR/READ/POKE USR loop(s) and sjasmplus-style
+ * `DG` visual blocks for all defined UDGs in a UDG map (`.jbas`).
+ *
+ * @param {Record<string, number[]>} udgMap
+ * @returns {string}
+ */
+function generateUdgDgCode(udgMap) {
+  if (!udgMap || typeof udgMap !== 'object') return '';
+
+  const letters = Object.keys(udgMap)
+    .map(k => k.toUpperCase())
+    .filter(k => /^[A-U]$/.test(k) && Array.isArray(udgMap[k]) && udgMap[k].length === 8)
+    .sort();
+
+  if (letters.length === 0) return '';
+
+  const groups = [];
+  for (const letter of letters) {
+    const code = letter.charCodeAt(0);
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup && lastGroup[lastGroup.length - 1].charCodeAt(0) + 1 === code) {
+      lastGroup.push(letter);
+    } else {
+      groups.push([letter]);
+    }
+  }
+
+  const loaderLines = [];
+  for (const grp of groups) {
+    const first = grp[0].toLowerCase();
+    const maxIdx = grp.length * 8 - 1;
+    loaderLines.push(`FOR i = 0 TO ${maxIdx}: READ b: POKE USR "${first}" + i, b: NEXT i`);
+  }
+
+  const dgBlocks = [];
+  for (const letter of letters) {
+    const chrCode = 144 + (letter.charCodeAt(0) - 65);
+    dgBlocks.push(`' UDG ${letter} (${chrCode})`);
+    dgBlocks.push(...formatUdgDgLines(udgMap[letter]));
+    dgBlocks.push('');
+  }
+
+  return [...loaderLines, '', ...dgBlocks].join('\n').trimEnd();
+}
+
+/**
+ * Parses a single 8-bit `DG` line (e.g. `DG ..####..`) into a byte (0..255), or null.
+ * @param {string} lineText
+ * @returns {number | null}
+ */
+function parseSingleDgByte(lineText) {
+  if (typeof lineText !== 'string') return null;
+  const m = lineText.trim().match(/^DG\s+([^']+)$/i);
+  if (!m) return null;
+  const bits = m[1].replace(/\s+/g, '');
+  if (bits.length !== 8) return null;
+  let val = 0;
+  for (let b = 0; b < 8; b++) {
+    const ch = bits[b];
+    if (ch === '.' || ch === '-' || ch === '_' || ch === '0') {
+      // 0
+    } else if (ch === '#' || ch === '*' || ch === '1' || ch === 'X' || ch === 'x' || ch === '█') {
+      val |= (1 << (7 - b));
+    } else {
+      return null;
+    }
+  }
+  return val;
 }
 
 /**
@@ -883,8 +1060,10 @@ function buildColorBarHtml() {
       </div>
       <div class="udg-data-code" id="udgDataOutput">DATA 0,0,0,0,0,0,0,0</div>
       <div class="udg-row">
-        <button class="btn-primary" id="generateAllUdgBtn" title="Genera el bucle FOR/POKE USR y todos los DATA de los UDGs guardados en .zxudgs.json">Generar FOR + DATA</button>
+        <button class="btn-primary" id="insertUdgDgBtn" title="Insertar 8 líneas DG (o actualizar el bloque DG actual) en .jbas">Insertar DG</button>
+        <button class="btn-primary" id="generateAllUdgDgBtn" title="Genera FOR/POKE USR y todos los UDGs guardados en formato visual DG (.jbas)">Generar FOR + DG</button>
         <button class="btn-clear" id="insertUdgDataBtn" title="Insertar DATA o actualizar el DATA de la línea actual">Insertar DATA</button>
+        <button class="btn-clear" id="generateAllUdgBtn" title="Genera el bucle FOR/POKE USR y todos los DATA de los UDGs guardados en .zxudgs.json">Generar FOR + DATA</button>
         <button class="btn-clear" id="deleteUdgBtn" title="Eliminar este UDG del fichero .zxudgs.json">Borrar UDG</button>
       </div>
       <div class="label" id="udgSavedList" style="font-size:10.5px; opacity:0.85;">UDGs guardados: ninguno</div>
@@ -1127,6 +1306,18 @@ function buildColorBarHtml() {
       saveCurrentUdg();
     });
 
+    document.getElementById('insertUdgDgBtn').addEventListener('click', () => {
+      vscode.postMessage({
+        command: 'insertUdgDg',
+        letter: udgLetterSelect.value,
+        bytes: udgRows.slice()
+      });
+    });
+
+    document.getElementById('generateAllUdgDgBtn').addEventListener('click', () => {
+      vscode.postMessage({ command: 'generateAllUdgsDgCode' });
+    });
+
     document.getElementById('generateAllUdgBtn').addEventListener('click', () => {
       vscode.postMessage({ command: 'generateAllUdgsCode' });
     });
@@ -1175,6 +1366,7 @@ class ColorPreviewController {
     this.lastActiveEditor = null;
     this.flashPhase = false;
     this.flashTimer = null;
+    this.copiedColorPayload = null;
   }
 
   init() {
@@ -1212,7 +1404,11 @@ class ColorPreviewController {
               } else if (msg && msg.command === 'deleteUdgEntry' && typeof msg.letter === 'string') {
                 this.deleteUdgEntryCommand(msg.letter);
               } else if (msg && msg.command === 'generateAllUdgsCode') {
-                this.generateAllUdgsCodeCommand();
+                this.generateAllUdgsCodeCommand(false);
+              } else if (msg && msg.command === 'generateAllUdgsDgCode') {
+                this.generateAllUdgsCodeCommand(true);
+              } else if (msg && msg.command === 'insertUdgDg' && Array.isArray(msg.bytes)) {
+                this.insertUdgDgCommand(msg.letter, msg.bytes);
               } else if (msg && msg.command === 'insertUdgData' && Array.isArray(msg.bytes)) {
                 this.insertUdgDataCommand(msg.letter, msg.bytes, !!msg.withLoader);
               }
@@ -1239,6 +1435,8 @@ class ColorPreviewController {
       }),
       this.vscode.commands.registerCommand('sinclairBasic.applySpectrumColor', () => this.promptAndApplyColor()),
       this.vscode.commands.registerCommand('sinclairBasic.applySpectrumAttribute', (args) => this.applyAttributeCommand(args)),
+      this.vscode.commands.registerCommand('sinclairBasic.copyWithColors', () => this.handleClipboardCommand('copy')),
+      this.vscode.commands.registerCommand('sinclairBasic.cutWithColors', () => this.handleClipboardCommand('cut')),
       this.vscode.window.onDidChangeActiveTextEditor(editor => {
         if (editor && this.isSinclairDoc(editor.document)) {
           this.lastActiveEditor = editor;
@@ -1264,7 +1462,13 @@ class ColorPreviewController {
         if (!e.contentChanges || e.contentChanges.length === 0) return;
         const uriKey = e.document.uri.toString();
         let linesMap = this.loadColorMapForDoc(e.document);
-        if (linesMap && Object.keys(linesMap).length > 0) {
+        const hadExistingColors = linesMap && Object.keys(linesMap).length > 0;
+        const payload = this.copiedColorPayload;
+        const hasMatchingPaste = payload && payload.hasColors && e.contentChanges.some(
+          ch => ch.text && ch.text.replace(/\r\n/g, '\n') === payload.normalizedText
+        );
+
+        if (hadExistingColors || hasMatchingPaste) {
           // Sort simultaneous VS Code contentChanges bottom-to-top so earlier edits
           // do not invalidate line/column offsets of later edits in the same event.
           const sortedChanges = [...e.contentChanges].sort((a, b) => {
@@ -1274,14 +1478,24 @@ class ColorPreviewController {
             return b.range.start.character - a.range.start.character;
           });
           for (const change of sortedChanges) {
-            linesMap = shiftColorMapForChange(
-              linesMap,
-              change.range.start.line,
-              change.range.start.character,
-              change.range.end.line,
-              change.range.end.character,
-              change.text
-            );
+            if (linesMap && Object.keys(linesMap).length > 0) {
+              linesMap = shiftColorMapForChange(
+                linesMap,
+                change.range.start.line,
+                change.range.start.character,
+                change.range.end.line,
+                change.range.end.character,
+                change.text
+              );
+            }
+            if (payload && payload.hasColors && change.text && change.text.replace(/\r\n/g, '\n') === payload.normalizedText) {
+              linesMap = applyColorSlice(
+                linesMap,
+                change.range.start.line,
+                change.range.start.character,
+                payload.lineRuns
+              );
+            }
           }
           this.fileColorMaps.set(uriKey, linesMap);
           this.saveColorMapForDoc(e.document, linesMap);
@@ -1301,6 +1515,48 @@ class ColorPreviewController {
     );
 
     this.refreshAllVisibleEditors();
+  }
+
+  async handleClipboardCommand(mode) {
+    const editor = this.vscode.window.activeTextEditor;
+    if (editor && this.isSinclairDoc(editor.document)) {
+      const doc = editor.document;
+      const sel = editor.selection;
+      const linesMap = this.loadColorMapForDoc(doc);
+
+      if (sel) {
+        let copiedText = '';
+        let lineRuns = [];
+        if (sel.isEmpty) {
+          // VS Code copies the entire line including trailing newline when selection is empty
+          const lineIdx = sel.active.line;
+          const lineText = doc.lineAt(lineIdx).text;
+          copiedText = lineText + '\n';
+          lineRuns = extractColorSlice(linesMap, lineIdx, 0, lineIdx, lineText.length);
+        } else {
+          const startLine = Math.min(sel.start.line, sel.end.line);
+          const endLine = Math.max(sel.start.line, sel.end.line);
+          const startCol = sel.start.line <= sel.end.line ? sel.start.character : sel.end.character;
+          const endCol = sel.start.line <= sel.end.line ? sel.end.character : sel.start.character;
+          copiedText = doc.getText(sel);
+          lineRuns = extractColorSlice(linesMap, startLine, startCol, endLine, endCol);
+        }
+
+        const hasColors = lineRuns.some(arr => arr.length > 0);
+        this.copiedColorPayload = hasColors
+          ? {
+            normalizedText: copiedText.replace(/\r\n/g, '\n'),
+            lineRuns,
+            hasColors: true
+          }
+          : null;
+      }
+    }
+
+    const builtInCmd = mode === 'cut'
+      ? 'editor.action.clipboardCutAction'
+      : 'editor.action.clipboardCopyAction';
+    await this.vscode.commands.executeCommand(builtInCmd);
   }
 
   isSinclairDoc(doc) {
@@ -1570,48 +1826,98 @@ class ColorPreviewController {
     if (!/^[A-U]$/.test(cleanLetter)) return;
 
     const doc = editor.document;
+    const isJBas = doc.languageId === 'jbas' || doc.fileName.endsWith('.jbas');
     const selections = editor.selections && editor.selections.length > 0
       ? editor.selections
       : [editor.selection];
 
-    // Record target start positions and inherited color attributes before editing
     const preMap = this.loadColorMapForDoc(doc);
-    const targets = selections.map(sel => {
-      const line = Math.min(sel.start.line, sel.end.line);
-      const col = sel.start.line <= sel.end.line ? sel.start.character : sel.end.character;
-      const preRuns = preMap[String(line)] || [];
-      // Inherit PAPER/INK/BRIGHT/FLASH/INVERSE from replaced char or preceding char
-      const inheritedRun =
-        preRuns.find(r => col >= r.start && col < r.end) ||
-        preRuns.find(r => col - 1 >= r.start && col - 1 < r.end) ||
-        null;
-      return { line, col, inherited: inheritedRun ? cleanAttrs(inheritedRun) : null };
-    });
+    const editOps = []; // { range, text, isInsert }
+    const tagTargets = []; // { line, start, end, perColInherited: Array<Object|null> }
 
-    await editor.edit(editBuilder => {
-      for (const sel of selections) {
-        if (sel.isEmpty) {
-          editBuilder.insert(sel.active, cleanLetter);
-        } else {
-          editBuilder.replace(sel, cleanLetter);
-        }
-      }
-    });
+    for (const sel of selections) {
+      if (sel.isEmpty) {
+        const line = sel.active.line;
+        const col = sel.active.character;
+        const preRuns = preMap[String(line)] || [];
+        const inheritedRun =
+          preRuns.find(r => col >= r.start && col < r.end) ||
+          preRuns.find(r => col - 1 >= r.start && col - 1 < r.end) ||
+          null;
+        editOps.push({ isInsert: true, pos: sel.active, text: cleanLetter });
+        tagTargets.push({
+          line,
+          start: col,
+          end: col + 1,
+          perColInherited: [inheritedRun ? cleanAttrs(inheritedRun) : null]
+        });
+      } else {
+        const startLine = Math.min(sel.start.line, sel.end.line);
+        const endLine = Math.max(sel.start.line, sel.end.line);
 
-    // Tag inserted UDG letter(s) with inherited colors + udg: 1 in color map
-    const uriKey = doc.uri.toString();
-    const linesMap = { ...this.loadColorMapForDoc(doc) };
-    for (const t of targets) {
-      const lineKey = String(t.line);
-      let runs = linesMap[lineKey] || [];
-      if (t.inherited) {
-        for (const k of ['paper', 'ink', 'bright', 'flash', 'inverse']) {
-          if (t.inherited[k] !== undefined) {
-            runs = applyColorToRuns(runs, t.col, t.col + 1, k.toUpperCase(), t.inherited[k]);
+        for (let lineIdx = startLine; lineIdx <= endLine; lineIdx++) {
+          const lineText = doc.lineAt(lineIdx).text;
+          const stringRanges = findStringRangesOnLine(lineText, isJBas);
+          const colStart = lineIdx === startLine ? sel.start.character : 0;
+          const colEnd = lineIdx === endLine ? sel.end.character : lineText.length;
+          if (colEnd <= colStart) continue;
+
+          const preRuns = preMap[String(lineIdx)] || [];
+
+          for (const { strStart, strEnd } of stringRanges) {
+            const s = Math.max(colStart, strStart);
+            const e = Math.min(colEnd, strEnd);
+            if (e <= s) continue;
+
+            const perColInherited = [];
+            for (let c = s; c < e; c++) {
+              const r = preRuns.find(run => c >= run.start && c < run.end) ||
+                preRuns.find(run => c - 1 >= run.start && c - 1 < run.end) ||
+                null;
+              perColInherited.push(r ? cleanAttrs(r) : null);
+            }
+
+            editOps.push({
+              isInsert: false,
+              range: new this.vscode.Range(lineIdx, s, lineIdx, e),
+              text: cleanLetter.repeat(e - s)
+            });
+            tagTargets.push({ line: lineIdx, start: s, end: e, perColInherited });
           }
         }
       }
-      runs = applyColorToRuns(runs, t.col, t.col + 1, 'UDG', 1);
+    }
+
+    if (editOps.length === 0) return;
+
+    await editor.edit(editBuilder => {
+      for (const op of editOps) {
+        if (op.isInsert) {
+          editBuilder.insert(op.pos, op.text);
+        } else {
+          editBuilder.replace(op.range, op.text);
+        }
+      }
+    });
+
+    // Tag all inserted/replaced UDG characters with their inherited colors + udg: 1
+    const uriKey = doc.uri.toString();
+    const linesMap = { ...this.loadColorMapForDoc(doc) };
+    for (const t of tagTargets) {
+      const lineKey = String(t.line);
+      let runs = linesMap[lineKey] || [];
+      for (let offset = 0; offset < (t.end - t.start); offset++) {
+        const c = t.start + offset;
+        const inherited = t.perColInherited[offset];
+        if (inherited) {
+          for (const k of ['paper', 'ink', 'bright', 'flash', 'inverse']) {
+            if (inherited[k] !== undefined) {
+              runs = applyColorToRuns(runs, c, c + 1, k.toUpperCase(), inherited[k]);
+            }
+          }
+        }
+        runs = applyColorToRuns(runs, c, c + 1, 'UDG', 1);
+      }
       linesMap[lineKey] = runs;
     }
     this.fileColorMaps.set(uriKey, linesMap);
@@ -1721,12 +2027,12 @@ class ColorPreviewController {
     this.saveUdgMapForDoc(editor.document, udgMap);
   }
 
-  async generateAllUdgsCodeCommand() {
+  async generateAllUdgsCodeCommand(useDgFormat = false) {
     const editor = this.getTargetEditor();
     if (!editor || !this.isSinclairDoc(editor.document)) return;
 
     const udgMap = this.loadUdgMapForDoc(editor.document);
-    const code = generateUdgBasicCode(udgMap);
+    const code = useDgFormat ? generateUdgDgCode(udgMap) : generateUdgBasicCode(udgMap);
     if (!code) {
       this.vscode.window.showInformationMessage('No hay UDGs guardados en el fichero .zxudgs.json todavía. Dibuja al menos un UDG en la rejilla 8×8.');
       return;
@@ -1741,15 +2047,89 @@ class ColorPreviewController {
     });
   }
 
+  findSurroundingDgBlock(doc, activeLine) {
+    if (parseSingleDgByte(doc.lineAt(activeLine).text) === null) return null;
+    let start = activeLine;
+    while (start > 0 && parseSingleDgByte(doc.lineAt(start - 1).text) !== null) {
+      start--;
+    }
+    let end = activeLine;
+    while (end + 1 < doc.lineCount && parseSingleDgByte(doc.lineAt(end + 1).text) !== null) {
+      end++;
+    }
+    if (end - start + 1 === 8) {
+      return { start, end };
+    }
+    return null;
+  }
+
+  async insertUdgDgCommand(letter, bytes) {
+    const editor = this.getTargetEditor();
+    if (!editor || !this.isSinclairDoc(editor.document)) return;
+
+    const cleanLetter = String(letter || 'A').toUpperCase();
+    const doc = editor.document;
+    const activeLine = editor.selection.active.line;
+    const lineText = doc.lineAt(activeLine).text;
+    const indent = (lineText.match(/^(\s*)/) || ['', ''])[1];
+
+    // If cursor is already inside an 8-line DG block, update it in place
+    const dgBlock = this.findSurroundingDgBlock(doc, activeLine);
+    if (dgBlock) {
+      const dgIndent = (doc.lineAt(dgBlock.start).text.match(/^(\s*)/) || ['', ''])[1];
+      const replacement = formatUdgDgLines(bytes, dgIndent).join('\n');
+      const blockRange = new this.vscode.Range(
+        dgBlock.start,
+        0,
+        dgBlock.end,
+        doc.lineAt(dgBlock.end).text.length
+      );
+      await editor.edit(editBuilder => {
+        editBuilder.replace(blockRange, replacement);
+      });
+      return;
+    }
+
+    const chrCode = 144 + (cleanLetter.charCodeAt(0) - 65);
+    const snippet = [
+      `${indent}' UDG ${cleanLetter} (${chrCode})`,
+      ...formatUdgDgLines(bytes, indent)
+    ].join('\n');
+
+    await editor.edit(editBuilder => {
+      if (editor.selection.isEmpty) {
+        editBuilder.insert(editor.selection.active, snippet);
+      } else {
+        editBuilder.replace(editor.selection, snippet);
+      }
+    });
+  }
+
   loadUdgFromActiveLine(notifyIfMissing = false) {
     const editor = this.getTargetEditor();
     if (!editor || !this.colorBarView) return;
-    const lineText = editor.document.lineAt(editor.selection.active.line).text;
-    const bytes = parseUdgDataFromLine(lineText);
-    if (bytes) {
+    const doc = editor.document;
+    const activeLine = editor.selection.active.line;
+    const lineText = doc.lineAt(activeLine).text;
+
+    // 1. Try DATA line
+    let bytes = parseUdgDataFromLine(lineText);
+
+    // 2. Try 8-line DG block
+    if (!bytes) {
+      const dgBlock = this.findSurroundingDgBlock(doc, activeLine);
+      if (dgBlock) {
+        bytes = [];
+        for (let l = dgBlock.start; l <= dgBlock.end; l++) {
+          bytes.push(parseSingleDgByte(doc.lineAt(l).text));
+        }
+      }
+    }
+
+    if (bytes && bytes.length === 8) {
       this.colorBarView.webview.postMessage({ command: 'loadUdgBytes', bytes });
     } else if (notifyIfMissing) {
-      this.vscode.window.showInformationMessage('Coloca el cursor sobre una línea DATA con 8 bytes (0..255) para cargarla en el editor 8×8.');
+      this.vscode.window.showInformationMessage('Coloca el cursor sobre una línea DATA (8 bytes) o un bloque DG de 8 líneas para cargarlo en el editor 8×8.');
     }
   }
 
@@ -1932,11 +2312,16 @@ module.exports = {
   parseUdgDataFromLine,
   formatUdgDataLine,
   generateUdgBasicCode,
+  formatUdgDgLines,
+  generateUdgDgCode,
+  parseSingleDgByte,
   buildColorBarHtml,
   resolveEffectiveColors,
   findStringRangesOnLine,
   applyColorToRuns,
   shiftColorMapForChange,
+  extractColorSlice,
+  applyColorSlice,
   injectColorsIntoSource,
   ColorPreviewController
 };

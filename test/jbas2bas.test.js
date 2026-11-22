@@ -354,5 +354,54 @@ GO TO @game_over
   assert.equal(lines[7], '80 GO TO 20');
 });
 
+test('compileJBas translates sjasmplus-style DG lines into compact 8-byte DATA statements', () => {
+  const { parseDgLine } = require('../src/core/jbas2bas.js');
+
+  // Single byte and multi-byte (spaced) DG parsing
+  assert.deepEqual(parseDgLine('DG ..####..'), { isDg: true, bytes: [60] });
+  assert.deepEqual(parseDgLine('DG ..####.# #.#.....'), { isDg: true, bytes: [61, 160] });
+
+  const source = `
+RESTORE @udg_data
+FOR i = 0 TO 15: READ b: POKE USR "a" + i, b: NEXT i
+STOP
+
+@udg_data:
+' Coco
+DG ........
+DG ........
+DG ........
+DG ...##...
+DG ...##...
+DG ........
+DG ........
+DG ........
+
+' Fantasma
+DG ..####..
+DG .######.
+DG ##.##.##
+DG ##.##.##
+DG ########
+DG ########
+DG ########
+DG ##.##.##
+`;
+
+  const res = compileJBas(source, { start: 10, step: 10 });
+  assert.equal(res.success, true);
+  const lines = res.text.trim().split(/\r?\n/);
+
+  // RESTORE @udg_data resolves to line 40 (first DATA line)
+  assert.equal(lines[0], '10 RESTORE 40');
+  assert.equal(lines[3], '40 DATA 0,0,0,24,24,0,0,0');
+  assert.equal(lines[4], '50 DATA 60,126,219,219,255,255,255,219');
+
+  // Invalid bit count reports an error
+  const bad = compileJBas('DG ..###');
+  assert.equal(bad.success, false);
+  assert.ok(bad.errors[0].includes('multiple of 8'));
+});
+
 
 

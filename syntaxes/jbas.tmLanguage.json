@@ -6,6 +6,7 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#labels" },
+    { "include": "#defineGraphic" },
     { "include": "#flowControl" },
     { "include": "#displayAttributes" },
     { "include": "#keywords" },
@@ -57,6 +58,28 @@
           "captures": {
             "1": { "name": "variable.other.label.jbas" }
           }
+        }
+      ]
+    },
+    "defineGraphic": {
+      "patterns": [
+        {
+          "name": "meta.define-graphic.jbas",
+          "begin": "^(\\s*)(?i:(DG))\\b",
+          "end": "(?='|$)",
+          "beginCaptures": {
+            "2": { "name": "keyword.other.jbas" }
+          },
+          "patterns": [
+            {
+              "name": "constant.numeric.graphic.on.jbas",
+              "match": "[#*1Xx█]+"
+            },
+            {
+              "name": "comment.line.graphic.off.jbas",
+              "match": "[.\\-_0]+"
+            }
+          ]
         }
       ]
     },

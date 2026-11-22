@@ -453,6 +453,55 @@ function formatLabelToTitle(label) {
 }
 
 /**
+ * Parses a sjasmplus-style `DG` (Define Graphic) line into an array of bytes.
+ * Example: `DG ..####..` -> [60], `DG ..####.# #.#.....` -> [61, 160].
+ * Accepts `.`, `-`, `_`, `0` as 0-bits and `#`, `*`, `1`, `X`, `x`, `█` as 1-bits.
+ * Spaces inside the pattern are ignored for visual grouping.
+ *
+ * @param {string} line
+ * @returns {{ isDg: boolean, bytes?: number[], error?: string }}
+ */
+function parseDgLine(line) {
+  const match = line.match(/^DG\s+(.+)$/i);
+  if (!match) return { isDg: false };
+
+  let patternPart = match[1].trim();
+  const remIdx = patternPart.search(/:\s*REM\b/i);
+  if (remIdx !== -1) {
+    patternPart = patternPart.slice(0, remIdx).trim();
+  }
+
+  const bits = patternPart.replace(/\s+/g, '');
+  if (bits.length === 0 || bits.length % 8 !== 0) {
+    return {
+      isDg: true,
+      error: `DG bit pattern must be a positive multiple of 8 bits (got ${bits.length} bits)`
+    };
+  }
+
+  const bytes = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let val = 0;
+    for (let b = 0; b < 8; b++) {
+      const ch = bits[i + b];
+      if (ch === '.' || ch === '-' || ch === '_' || ch === '0') {
+        // 0 bit
+      } else if (ch === '#' || ch === '*' || ch === '1' || ch === 'X' || ch === 'x' || ch === '█') {
+        val |= (1 << (7 - b));
+      } else {
+        return {
+          isDg: true,
+          error: `Invalid character '${ch}' in DG pattern (use . - _ 0 for 0 and # * 1 X for 1)`
+        };
+      }
+    }
+    bytes.push(val);
+  }
+
+  return { isDg: true, bytes };
+}
+
+/**
  * Compiles a .jbas string into a numbered Sinclair .bas string.
  * 
  * @param {string} sourceText 
@@ -493,7 +542,25 @@ function compileJBas(sourceText, options = {}) {
   // PASS 1: Strip or convert comments, collect labels, identify statements
   const statements = [];
   let pendingLabels = [];
+  let pendingDg = null; // { origLineNum: number, bytes: number[], labels: string[] }
   const seenLabels = new Map(); // labelName -> origLineNum
+
+  const flushPendingDg = () => {
+    if (!pendingDg || pendingDg.bytes.length === 0) {
+      pendingDg = null;
+      return;
+    }
+    const { origLineNum: dgLine, bytes, labels } = pendingDg;
+    for (let offset = 0; offset < bytes.length; offset += 8) {
+      const chunk = bytes.slice(offset, offset + 8);
+      statements.push({
+        origLineNum: dgLine,
+        code: `DATA ${chunk.join(',')}`,
+        labels: offset === 0 ? labels : []
+      });
+    }
+    pendingDg = null;
+  };
 
   for (let idx = 0; idx < rawLines.length; idx++) {
     const origLineNum = idx + 1;
@@ -507,9 +574,14 @@ function compileJBas(sourceText, options = {}) {
     }
 
     // Extract any leading label definitions: @name:
+    let extractedAnyLabel = false;
     while (true) {
       const labelMatch = line.match(/^@([a-zA-Z0-9_]+):\s*(.*)$/);
       if (labelMatch) {
+        if (!extractedAnyLabel) {
+          flushPendingDg();
+          extractedAnyLabel = true;
+        }
         const labelName = labelMatch[1];
         if (seenLabels.has(labelName)) {
           const prevLine = seenLabels.get(labelName);
@@ -529,6 +601,38 @@ function compileJBas(sourceText, options = {}) {
 
     // If code remains after label extraction, it's a statement
     if (line) {
+      // Check for sjasmplus-style DG (Define Graphic) directive
+      const dg = parseDgLine(line);
+      if (dg.isDg) {
+        if (dg.error) {
+          errors.push(`Line ${origLineNum}: ${dg.error}`);
+          continue;
+        }
+        if (includeLabelComments && pendingLabels.length > 0) {
+          flushPendingDg();
+          for (const lbl of pendingLabels) {
+            statements.push({
+              origLineNum: seenLabels.get(lbl) || origLineNum,
+              code: `REM SUB ${formatLabelToTitle(lbl)}`,
+              labels: [lbl]
+            });
+          }
+          pendingLabels = [];
+        }
+        if (!pendingDg) {
+          pendingDg = {
+            origLineNum,
+            bytes: [],
+            labels: pendingLabels
+          };
+          pendingLabels = [];
+        }
+        pendingDg.bytes.push(...dg.bytes);
+        continue;
+      }
+
+      flushPendingDg();
+
       if (includeLabelComments && pendingLabels.length > 0) {
         for (const lbl of pendingLabels) {
           statements.push({
@@ -548,6 +652,8 @@ function compileJBas(sourceText, options = {}) {
     }
   }
 
+  flushPendingDg();
+
   // If there are trailing labels with no statement, emit label comments if enabled
   if (includeLabelComments && pendingLabels.length > 0) {
     for (const lbl of pendingLabels) {
@@ -565,7 +671,7 @@ function compileJBas(sourceText, options = {}) {
       success: false,
       text: '',
       labels: labelMap,
-      errors: ['Source contains no BASIC statements.'],
+      errors: errors.length > 0 ? errors : ['Source contains no BASIC statements.'],
       warnings,
       linesCount: 0
     };
@@ -789,6 +895,7 @@ function transpileJBasAllVersions(sourceText, options = {}) {
 module.exports = {
   stripComments,
   convertCommentsToRem,
+  parseDgLine,
   formatLabelToTitle,
   replaceLabelsOutsideStrings,
   compactWhitespaceOutsideStrings,

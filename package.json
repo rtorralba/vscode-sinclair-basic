@@ -467,6 +467,18 @@
         "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
       },
       {
+        "command": "sinclairBasic.copyWithColors",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
+      },
+      {
+        "command": "sinclairBasic.cutWithColors",
+        "key": "ctrl+x",
+        "mac": "cmd+x",
+        "when": "editorTextFocus && (editorLangId == sinclair-basic || editorLangId == jbas)"
+      },
+      {
         "command": "sinclairBasic.applySpectrumColor",
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c",

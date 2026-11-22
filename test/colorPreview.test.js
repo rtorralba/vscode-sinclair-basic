@@ -5,11 +5,17 @@ const {
   parseUdgDataFromLine,
   formatUdgDataLine,
   generateUdgBasicCode,
+  formatUdgDgLines,
+  generateUdgDgCode,
+  parseSingleDgByte,
   buildColorBarHtml,
   resolveEffectiveColors,
   applyColorToRuns,
   shiftColorMapForChange,
-  injectColorsIntoSource
+  extractColorSlice,
+  applyColorSlice,
+  injectColorsIntoSource,
+  ColorPreviewController
 } = require('../src/core/colorPreview.js');
 const { tokenizeLine } = require('../src/core/tapGenerator.js');
 
@@ -166,5 +172,138 @@ test('generateUdgBasicCode groups contiguous UDGs into single FOR loop and emits
   assert.ok(code.includes('DATA 0,0,0,24,24,0,0,0'));
   assert.ok(code.includes('REM UDG F (149)'));
   assert.ok(code.includes('DATA 60,126,219,219,255,255,255,219'));
+});
+
+test('insertUdgCommand replaces all selected characters inside strings with UDG letter and preserves colors', async () => {
+  class MockRange {
+    constructor(sl, sc, el, ec) {
+      this.start = { line: sl, character: sc };
+      this.end = { line: el, character: ec };
+    }
+  }
+  const lines = ['PRINT "     "'];
+  const doc = {
+    uri: { scheme: 'untitled', toString: () => 'untitled:test.jbas' },
+    fileName: 'test.jbas',
+    languageId: 'jbas',
+    lineCount: 1,
+    isClosed: false,
+    lineAt: (i) => ({ text: lines[i] }),
+    getText: () => lines.join('\n')
+  };
+  const editor = {
+    document: doc,
+    selection: {
+      start: { line: 0, character: 7 },
+      end: { line: 0, character: 12 },
+      active: { line: 0, character: 12 },
+      isEmpty: false
+    },
+    selections: [{
+      start: { line: 0, character: 7 },
+      end: { line: 0, character: 12 },
+      active: { line: 0, character: 12 },
+      isEmpty: false
+    }],
+    setDecorations: () => {},
+    edit: async (cb) => {
+      cb({
+        replace: (range, text) => {
+          const l = lines[range.start.line];
+          lines[range.start.line] = l.slice(0, range.start.character) + text + l.slice(range.end.character);
+        },
+        insert: () => {}
+      });
+      return true;
+    }
+  };
+  const mockVscode = {
+    Range: MockRange,
+    DecorationRangeBehavior: { ClosedClosed: 0 },
+    window: {
+      activeTextEditor: editor,
+      createTextEditorDecorationType: () => ({ dispose: () => {} })
+    },
+    workspace: {
+      getConfiguration: () => ({ get: () => true })
+    }
+  };
+
+  const ctrl = new ColorPreviewController(mockVscode, null);
+  ctrl.fileColorMaps.set('untitled:test.jbas', {
+    '0': [{ start: 7, end: 12, paper: 0, ink: 7 }]
+  });
+
+  await ctrl.insertUdgCommand('A');
+  assert.equal(lines[0], 'PRINT "AAAAA"');
+  assert.deepEqual(ctrl.fileColorMaps.get('untitled:test.jbas'), {
+    '0': [{ start: 7, end: 12, paper: 0, ink: 7, udg: 1 }]
+  });
+});
+
+test('extractColorSlice and applyColorSlice preserve Spectrum colors and UDG flags across copy/paste', () => {
+  const sourceMap = {
+    '10': [
+      { start: 21, end: 25, paper: 0, ink: 7, udg: 1 },
+      { start: 25, end: 26, paper: 1, ink: 7 },
+      { start: 26, end: 29, paper: 0, ink: 7, udg: 1 }
+    ],
+    '11': [
+      { start: 21, end: 29, paper: 0, ink: 7, udg: 1 }
+    ]
+  };
+
+  // Copy partial selection on line 10 (cols 23..28) -> paste at line 20, col 10
+  const singleSlice = extractColorSlice(sourceMap, 10, 23, 10, 28);
+  assert.deepEqual(singleSlice, [[
+    { start: 0, end: 2, paper: 0, ink: 7, udg: 1 },
+    { start: 2, end: 3, paper: 1, ink: 7 },
+    { start: 3, end: 5, paper: 0, ink: 7, udg: 1 }
+  ]]);
+
+  const afterInlinePaste = applyColorSlice({}, 20, 10, singleSlice);
+  assert.deepEqual(afterInlinePaste, {
+    '20': [
+      { start: 10, end: 12, paper: 0, ink: 7, udg: 1 },
+      { start: 12, end: 13, paper: 1, ink: 7 },
+      { start: 13, end: 15, paper: 0, ink: 7, udg: 1 }
+    ]
+  });
+
+  // Copy multi-line selection (line 10 col 21 .. line 11 col 29) -> paste at line 30 col 21
+  const multiSlice = extractColorSlice(sourceMap, 10, 21, 11, 29);
+  const afterMultiPaste = applyColorSlice({}, 30, 21, multiSlice);
+  assert.deepEqual(afterMultiPaste, {
+    '30': [
+      { start: 21, end: 25, paper: 0, ink: 7, udg: 1 },
+      { start: 25, end: 26, paper: 1, ink: 7 },
+      { start: 26, end: 29, paper: 0, ink: 7, udg: 1 }
+    ],
+    '31': [
+      { start: 21, end: 29, paper: 0, ink: 7, udg: 1 }
+    ]
+  });
+});
+
+test('formatUdgDgLines, generateUdgDgCode, and parseSingleDgByte round-trip UDG sprites in DG format', () => {
+  const ghost = [60, 126, 219, 219, 255, 255, 255, 219];
+  const dgLines = formatUdgDgLines(ghost);
+  assert.deepEqual(dgLines, [
+    'DG ..####..',
+    'DG .######.',
+    'DG ##.##.##',
+    'DG ##.##.##',
+    'DG ########',
+    'DG ########',
+    'DG ########',
+    'DG ##.##.##'
+  ]);
+  assert.deepEqual(dgLines.map(parseSingleDgByte), ghost);
+
+  const code = generateUdgDgCode({ A: [0, 0, 0, 24, 24, 0, 0, 0], F: ghost });
+  assert.ok(code.includes('FOR i = 0 TO 7: READ b: POKE USR "a" + i, b: NEXT i'));
+  assert.ok(code.includes('FOR i = 0 TO 7: READ b: POKE USR "f" + i, b: NEXT i'));
+  assert.ok(code.includes("' UDG F (149)"));
+  assert.ok(code.includes('DG ##.##.##'));
 });
 
